@@ -5,6 +5,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.1] — 2026-02-23
+
+### Fixed
+- **Pattern Fill — broken mode after SelectTool round-trip.** `Disable()` previously
+  reset `_active_mode` to `NONE`, so returning to the tool left the overlay ignoring
+  clicks. `Enable()` now restores the mode from the UI `OptionButton` selector.
+- **Pattern Fill — `is not part of the current tag set` warnings.** Textures were loaded
+  with `no_cache=true`, producing a new `Texture` instance unknown to Dungeondraft's
+  asset registry. SelectTool could not resolve the tag for the placed pattern shape.
+  Changed to `no_cache=false` so the engine-cached instance is reused.
+
+---
+
 ## [1.0.0] — 2026-02-23
 
 ### Added

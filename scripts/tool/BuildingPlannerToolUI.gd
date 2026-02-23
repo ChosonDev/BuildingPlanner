@@ -354,7 +354,9 @@ func _on_pf_texture_selected(index: int):
 	if path == "":
 		if LOGGER: LOGGER.warn("%s: no path for index=%d" % [CLASS_NAME, index])
 		return
-	var tex = ResourceLoader.load(path, "Texture", true)
+	# no_cache=false: reuse Dungeondraft's cached texture instance so that the
+	# asset-tag lookup in SelectTool and SetOptions works correctly.
+	var tex = ResourceLoader.load(path, "Texture", false)
 	_tool._pattern_fill.active_texture = tex
 
 func _on_pf_color_changed(color: Color):

@@ -123,11 +123,18 @@ func Enable():
 	# Lazily build the pattern GridMenu now that the Editor is definitely ready
 	if _ui and _ui.has_method("_try_build_grid_menu"):
 		_ui._try_build_grid_menu()
+	# Restore the active mode from the UI selector (was reset to NONE on Disable)
+	if _ui and _ui._mode_selector:
+		var mode = _ui._mode_selector.get_item_id(_ui._mode_selector.selected)
+		_set_mode(mode)
+	else:
+		_set_mode(Mode.PATTERN_FILL)
 
 # Called when the user switches away from this tool.
 func Disable():
 	is_enabled = false
-	_set_mode(Mode.NONE)
+	# Do NOT reset _active_mode here — the overlay already guards on is_enabled,
+	# and we need the mode to survive Disable/Enable cycles (e.g. SelectTool round-trip).
 	# Return the borrowed GridMenu to PatternShapeTool before we disappear
 	if _ui and _ui.has_method("release_grid_menu"):
 		_ui.release_grid_menu()
