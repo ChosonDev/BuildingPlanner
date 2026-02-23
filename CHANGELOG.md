@@ -5,6 +5,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.3] — 2026-02-24
+
+### Added
+- **Undo/redo support for Pattern Fill.** Placing a pattern shape is now fully
+  undoable and redoable via the standard Dungeondraft Ctrl+Z / Ctrl+Y shortcuts.
+  `PatternFillRecord` snapshots the created shapes with `PatternShape.Save()` at
+  placement time; `undo()` removes the live nodes, `redo()` restores them via
+  `PatternShapes.LoadShape()`.
+- **Undo/redo support for Wall Builder.** Placing a wall is now fully undoable and
+  redoable. `WallBuildRecord` snapshots the wall with `Wall.Save()` at placement
+  time; `undo()` removes the live node, `redo()` restores it via `Walls.LoadWall()`.
+
+### Changed
+- History record classes (`PatternFillRecord`, `WallBuildRecord`, `MirrorPlacementRecord`)
+  are now centralised in `scripts/tool/BuildingPlannerHistory.gd`.
+  Feature files reference them via a `preload` constant.
+
+---
+
 ## [1.0.2] — 2026-02-23
 
 ### Added
