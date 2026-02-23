@@ -5,6 +5,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.2] — 2026-02-23
+
+### Added
+- **Wall Builder — fully implemented.** Clicking on a Shape marker in Wall Builder mode
+  now creates a closed wall along the marker polygon outline.
+- Wall texture selection via an embedded GridMenu in the sidebar (sourced from
+  `WallTool.Controls["Texture"]`, same technique as AdditionalSearchOptions).
+- Shadow and Bevel corner toggles for the generated wall.
+- Wall texture and color are read from `WallTool` state at click time, so the selected
+  wall type is always used without a separate confirm step.
+
+### Changed
+- Wall Builder section in the sidebar no longer requires a Marker ID — walls are placed
+  by clicking directly on the Shape marker, consistent with Pattern Fill behaviour.
+
+---
+
 ## [1.0.1] — 2026-02-23
 
 ### Fixed

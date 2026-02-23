@@ -101,7 +101,7 @@ func _init_features():
 		LOGGER.warn("%s: Failed to load PatternFill.gd" % CLASS_NAME)
 
 	if WallBuilderClass:
-		_wall_builder = WallBuilderClass.new(_gl_api, LOGGER)
+		_wall_builder = WallBuilderClass.new(_gl_api, LOGGER, parent_mod)
 	elif LOGGER:
 		LOGGER.warn("%s: Failed to load WallBuilder.gd" % CLASS_NAME)
 
@@ -123,6 +123,9 @@ func Enable():
 	# Lazily build the pattern GridMenu now that the Editor is definitely ready
 	if _ui and _ui.has_method("_try_build_grid_menu"):
 		_ui._try_build_grid_menu()
+	# Lazily build the wall texture GridMenu
+	if _ui and _ui.has_method("_try_build_wb_grid_menu"):
+		_ui._try_build_wb_grid_menu()
 	# Restore the active mode from the UI selector (was reset to NONE on Disable)
 	if _ui and _ui._mode_selector:
 		var mode = _ui._mode_selector.get_item_id(_ui._mode_selector.selected)
@@ -135,9 +138,12 @@ func Disable():
 	is_enabled = false
 	# Do NOT reset _active_mode here — the overlay already guards on is_enabled,
 	# and we need the mode to survive Disable/Enable cycles (e.g. SelectTool round-trip).
-	# Return the borrowed GridMenu to PatternShapeTool before we disappear
+	# Return the borrowed pattern GridMenu before we disappear
 	if _ui and _ui.has_method("release_grid_menu"):
 		_ui.release_grid_menu()
+	# Return the borrowed wall GridMenu before we disappear
+	if _ui and _ui.has_method("release_wb_grid_menu"):
+		_ui.release_wb_grid_menu()
 	_destroy_overlay()
 
 # Called every frame while the mod is loaded (from BuildingPlanner.gd).
@@ -203,19 +209,12 @@ func handle_pattern_fill_click(world_pos: Vector2) -> void:
 		return
 	_pattern_fill.fill_at(world_pos)
 
-## Executes Wall Builder on the active marker.
-func execute_wall_build() -> bool:
-	if active_marker_id < 0:
-		if LOGGER: LOGGER.warn("%s: no marker selected for Wall Builder." % CLASS_NAME)
-		return false
+## Called by BuildingPlannerOverlay when the user left-clicks in Wall Builder mode.
+func handle_wall_builder_click(world_pos: Vector2) -> void:
 	if not _wall_builder:
 		if LOGGER: LOGGER.error("%s: WallBuilder module not loaded." % CLASS_NAME)
-		return false
-	if not cached_world or not cached_world.Level:
-		if LOGGER: LOGGER.error("%s: World/Level not loaded." % CLASS_NAME)
-		return false
-	var wall_node = cached_world.Level.get_node_or_null("Walls")
-	return not _wall_builder.build(active_marker_id, wall_node).empty()
+		return
+	_wall_builder.build_at(world_pos)
 
 ## Activates or deactivates Mirror Mode on the active marker.
 func execute_mirror_toggle() -> bool:

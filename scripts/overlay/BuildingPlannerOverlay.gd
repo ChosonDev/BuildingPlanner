@@ -46,3 +46,6 @@ func _input(event: InputEvent) -> void:
 		tool.Mode.PATTERN_FILL:
 			tool.handle_pattern_fill_click(world_pos)
 			get_tree().set_input_as_handled()
+		tool.Mode.WALL_BUILDER:
+			tool.handle_wall_builder_click(world_pos)
+			get_tree().set_input_as_handled()

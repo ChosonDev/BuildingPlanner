@@ -15,8 +15,9 @@ extends Reference
 #     Outline    CheckButton
 #     [Fill Shape] Button
 #   ── section: Wall Builder ──────────────────────────────────────
-#     Marker ID  SpinBox
-#     [Build Walls] Button
+#     Wall texture  GridMenu (mirrored from WallTool.Controls["Texture"])
+#     Shadow        CheckButton
+#     Bevel         CheckButton
 #   ── section: Mirror Mode ───────────────────────────────────────
 #     Marker ID  SpinBox
 #     [Activate / Deactivate] ToggleButton
@@ -51,8 +52,12 @@ var _pf_outline_check       = null
 
 # Wall Builder section
 var _wb_section             = null
-var _wb_marker_spin         = null
-var _wb_build_button        = null
+var _wb_grid_menu           = null   # Our mirror ItemList (owned)
+var _wb_index_to_path       = {}     # {int index -> String resource_path}
+var _wb_menu_container      = null   # VBoxContainer placeholder inside the section
+var _wb_source_menu         = null   # WallTool Controls["Texture"] GridMenu reference
+var _wb_shadow_check        = null
+var _wb_bevel_check         = null
 
 # Mirror Mode section
 var _mm_section             = null
@@ -133,15 +138,6 @@ func build(panel):
 func _build_pattern_fill_section() -> VBoxContainer:
 	var sec = VBoxContainer.new()
 	sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-	# Usage hint
-	var hint = Label.new()
-	hint.text = "Click on a Shape marker to fill it with the selected pattern."
-	hint.modulate = Color(1,1,1,0.75)
-	hint.autowrap = true
-	sec.add_child(hint)
-
-	sec.add_child(_spacer(4))
 
 	# --- Pattern grid menu slot (filled lazily on first show) ---
 	sec.add_child(_row_label("Pattern:"))
@@ -281,24 +277,121 @@ func _build_wall_builder_section() -> VBoxContainer:
 	var sec = VBoxContainer.new()
 	sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
-	sec.add_child(_row_label("Marker ID:"))
-	_wb_marker_spin = SpinBox.new()
-	_wb_marker_spin.min_value = 0
-	_wb_marker_spin.max_value = 99999
-	_wb_marker_spin.step = 1
-	_wb_marker_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_wb_marker_spin.connect("value_changed", self, "_on_wb_marker_changed")
-	sec.add_child(_wb_marker_spin)
+	# --- Wall texture grid menu slot (filled lazily on Enable) ---
+	sec.add_child(_row_label("Wall:"))
+	_wb_menu_container = VBoxContainer.new()
+	_wb_menu_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sec.add_child(_wb_menu_container)
 
 	sec.add_child(_spacer(6))
 
-	_wb_build_button = Button.new()
-	_wb_build_button.text = "Build Walls"
-	_wb_build_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_wb_build_button.connect("pressed", self, "_on_wb_build_pressed")
-	sec.add_child(_wb_build_button)
+	# Shadow
+	_wb_shadow_check = CheckButton.new()
+	_wb_shadow_check.text = "Shadow"
+	_wb_shadow_check.pressed = true
+	_wb_shadow_check.connect("toggled", self, "_on_wb_shadow_toggled")
+	sec.add_child(_wb_shadow_check)
+
+	# Bevel
+	_wb_bevel_check = CheckButton.new()
+	_wb_bevel_check.text = "Bevel corners"
+	_wb_bevel_check.pressed = true
+	_wb_bevel_check.connect("toggled", self, "_on_wb_bevel_toggled")
+	sec.add_child(_wb_bevel_check)
 
 	return sec
+
+# ============================================================================
+# WALL BUILDER GRID MENU FACTORY
+# ============================================================================
+
+# Borrows WallTool.Controls["Texture"] to read its items, then builds
+# an independent mirror ItemList in our panel.
+# WallTool exposes its grid via Controls dict, not a textureMenu property.
+func _try_build_wb_grid_menu():
+	if _wb_grid_menu != null or _wb_menu_container == null:
+		return
+
+	if not _tool or not _tool.parent_mod:
+		if LOGGER: LOGGER.warn("%s: parent_mod not available." % CLASS_NAME)
+		return
+
+	var gl = _tool.parent_mod.Global
+	if not gl.Editor or not gl.Editor.Tools.has("WallTool"):
+		if LOGGER: LOGGER.warn("%s: WallTool not in Tools[]." % CLASS_NAME)
+		return
+
+	# WallTool exposes its GridMenu via Controls["Texture"] (same pattern as other tools)
+	var controls = gl.Editor.Tools["WallTool"].get("Controls")
+	if not controls or not controls.has("Texture"):
+		if LOGGER: LOGGER.warn("%s: WallTool.Controls[Texture] not found." % CLASS_NAME)
+		return
+
+	var source_menu = controls["Texture"]
+	if not source_menu:
+		if LOGGER: LOGGER.warn("%s: WallTool Controls[Texture] is null." % CLASS_NAME)
+		return
+
+	var count = source_menu.get_item_count()
+	if count == 0:
+		if LOGGER: LOGGER.warn("%s: WallTool Controls[Texture] has 0 items." % CLASS_NAME)
+		return
+
+	_wb_source_menu = source_menu
+
+	var lookup = source_menu.get("Lookup")  # Dictionary {resource_path: index}
+	if not lookup or lookup.empty():
+		if LOGGER: LOGGER.warn("%s: WallTool GridMenu.Lookup is empty." % CLASS_NAME)
+		return
+
+	# Invert: {index: resource_path}
+	_wb_index_to_path.clear()
+	for path in lookup.keys():
+		_wb_index_to_path[lookup[path]] = path
+
+	var scroll = ScrollContainer.new()
+	scroll.rect_min_size = Vector2(0, 160)
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	_wb_grid_menu = ItemList.new()
+	_wb_grid_menu.icon_mode = ItemList.ICON_MODE_TOP
+	_wb_grid_menu.fixed_icon_size = Vector2(48, 48)
+	_wb_grid_menu.fixed_column_width = 56
+	_wb_grid_menu.max_columns = 0
+	_wb_grid_menu.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_wb_grid_menu.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_wb_grid_menu.connect("item_selected", self, "_on_wb_texture_selected")
+
+	for i in range(count):
+		var icon = source_menu.get_item_icon(i)
+		var tooltip = _wb_index_to_path.get(i, str(i)).get_file().get_basename()
+		if icon:
+			_wb_grid_menu.add_item("", icon)
+		else:
+			_wb_grid_menu.add_item(tooltip)
+		_wb_grid_menu.set_item_tooltip(_wb_grid_menu.get_item_count() - 1, tooltip)
+
+	scroll.add_child(_wb_grid_menu)
+	_wb_menu_container.add_child(scroll)
+
+	# Pre-select first item
+	_wb_grid_menu.select(0)
+	_on_wb_texture_selected(0)
+
+	if LOGGER: LOGGER.info("%s: wall ItemList built with %d items." % [CLASS_NAME, _wb_grid_menu.get_item_count()])
+
+# Destroys the wall mirror ItemList (owned by us).
+func release_wb_grid_menu():
+	if not _wb_grid_menu:
+		return
+	if _wb_grid_menu.is_connected("item_selected", self, "_on_wb_texture_selected"):
+		_wb_grid_menu.disconnect("item_selected", self, "_on_wb_texture_selected")
+	for child in _wb_menu_container.get_children():
+		_wb_menu_container.remove_child(child)
+		child.queue_free()
+	_wb_grid_menu = null
+	_wb_source_menu = null
+	_wb_index_to_path.clear()
 
 
 func _build_mirror_mode_section() -> VBoxContainer:
@@ -379,13 +472,20 @@ func _on_pf_outline_toggled(pressed: bool):
 # CALLBACKS — WALL BUILDER
 # ============================================================================
 
-func _on_wb_marker_changed(value: float):
-	_tool.active_marker_id = int(value)
+func _on_wb_texture_selected(index: int):
+	# Drive WallTool.Texture via its own GridMenu — same technique AdditionalSearchOptions uses.
+	# This avoids guessing the resource path format (png vs tres) for ResourceLoader.
+	if _wb_source_menu and _wb_source_menu.has_method("OnItemSelected"):
+		_wb_source_menu.OnItemSelected(index)
 
-func _on_wb_build_pressed():
-	var ok = _tool.execute_wall_build()
-	if not ok and LOGGER:
-		LOGGER.warn("%s: Wall Build did not complete." % CLASS_NAME)
+func _on_wb_shadow_toggled(pressed: bool):
+	if _tool._wall_builder:
+		_tool._wall_builder.active_shadow = pressed
+
+func _on_wb_bevel_toggled(pressed: bool):
+	if _tool._wall_builder:
+		# 0 = Sharp, 1 = Bevel, 2 = Round
+		_tool._wall_builder.active_joint = 1 if pressed else 0
 
 # ============================================================================
 # CALLBACKS — MIRROR MODE
