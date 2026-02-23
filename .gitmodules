@@ -1,0 +1,7 @@
+[submodule "dependencies/_Lib"]
+	path = dependencies/_Lib
+	url = https://github.com/CreepyCre/_Lib.git
+
+[submodule "dependencies/GuidesLines"]
+	path = dependencies/GuidesLines
+	url = https://github.com/ChosonDev/GuidesLines.git
