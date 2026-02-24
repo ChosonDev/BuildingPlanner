@@ -6,8 +6,32 @@ extends Reference
 # Usage in feature scripts:
 #   const BuildingPlannerHistory = preload("../tool/BuildingPlannerHistory.gd")
 #   _record_history(BuildingPlannerHistory.PatternFillRecord.new(...))
+#
+# All records implement the HistoryApi contract:
+#   undo()        — removes the created objects from the scene
+#   redo()        — restores them from serialised data
+#   dropped(type) — called by HistoryApi when record leaves the stack:
+#                   type UNDO  → record was pushed out while active (objects
+#                                are still in scene; nothing to do)
+#                   type REDO  → record was invalidated after a new action
+#                                while in redo position (objects already freed;
+#                                clear saved data to release memory)
+#   record_type() → String key used by HistoryApi for max_count grouping
 
 const CLASS_NAME = "BuildingPlannerHistory"
+
+# ============================================================================
+# SHARED HELPERS
+# ============================================================================
+
+# Safe node removal: removes [node] from its parent and frees it.
+static func _free_node(node, _world = null) -> void:
+	if node == null or not is_instance_valid(node):
+		return
+	var p = node.get_parent()
+	if p:
+		p.remove_child(node)
+	node.queue_free()
 
 # ============================================================================
 # PATTERN FILL RECORD
@@ -34,8 +58,7 @@ class PatternFillRecord:
 
 	func undo():
 		for s in _shape_nodes:
-			if is_instance_valid(s):
-				s.queue_free()
+			_free_node(s)
 		_shape_nodes = []
 		if LOGGER:
 			LOGGER.debug("PatternFillRecord.undo(): removed %d shape(s)." % [_shape_datas.size()])
@@ -53,54 +76,16 @@ class PatternFillRecord:
 		if LOGGER:
 			LOGGER.debug("PatternFillRecord.redo(): restored %d shape(s)." % [_shape_nodes.size()])
 
+	# Called by HistoryApi when record is evicted from history stack.
+	# type 0 = UNDO (objects are live — nothing to do)
+	# type 1 = REDO (objects already freed — release saved data)
+	func dropped(type: int) -> void:
+		if type == 1:   # REDO direction
+			_shape_datas.clear()
+			_shape_nodes.clear()
+
 	func record_type() -> String:
 		return "BuildingPlanner.PatternFill"
-
-# ============================================================================
-# WALL BUILD RECORD
-# ============================================================================
-
-# Undo/redo record for a single wall-build operation.
-# Stores the serialised wall data for redo and the live node ref for undo.
-class WallBuildRecord:
-	var _parent_mod
-	var LOGGER
-	var _wall_data: Dictionary   # from Wall.Save()
-	var _wall_node               # current live Wall node reference
-
-	func _init(p_mod, logger, wall):
-		_parent_mod = p_mod
-		LOGGER = logger
-		_wall_node = wall
-		_wall_data = wall.Save()
-		if LOGGER:
-			LOGGER.debug("WallBuildRecord created.")
-
-	func undo():
-		if is_instance_valid(_wall_node):
-			_wall_node.queue_free()
-		_wall_node = null
-		if LOGGER:
-			LOGGER.debug("WallBuildRecord.undo(): removed wall.")
-
-	func redo():
-		if not _parent_mod or not _parent_mod.Global.World or not _parent_mod.Global.World.Level:
-			if LOGGER: LOGGER.error("WallBuildRecord.redo(): World/Level not available.")
-			return
-		var walls = _parent_mod.Global.World.Level.Walls
-		# Snapshot child count so we can identify the newly added wall node.
-		var count_before: int = walls.get_child_count()
-		walls.LoadWall(_wall_data)
-		var children: Array = walls.get_children()
-		if children.size() > count_before:
-			_wall_node = children[children.size() - 1]
-		else:
-			_wall_node = null
-		if LOGGER:
-			LOGGER.debug("WallBuildRecord.redo(): restored wall.")
-
-	func record_type() -> String:
-		return "BuildingPlanner.WallBuild"
 
 # ============================================================================
 # MIRROR PLACEMENT RECORD
@@ -128,5 +113,9 @@ class MirrorPlacementRecord:
 	func redo():
 		pass  # TODO: re-place both objects
 
+	func dropped(_type: int) -> void:
+		pass
+
 	func record_type() -> String:
 		return "BuildingPlanner.MirrorPlacement"
+

@@ -49,3 +49,6 @@ func _input(event: InputEvent) -> void:
 		tool.Mode.WALL_BUILDER:
 			tool.handle_wall_builder_click(world_pos)
 			get_tree().set_input_as_handled()
+		tool.Mode.ROOM_BUILDER:
+			tool.handle_room_builder_click(world_pos)
+			get_tree().set_input_as_handled()

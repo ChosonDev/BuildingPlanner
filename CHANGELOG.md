@@ -5,6 +5,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.4] — 2026-02-24
+
+### Added
+- **Room Builder mode.** New tool mode that creates a complete room in one click:
+  fills the area of the Shape marker under the cursor with the selected pattern,
+  then places a closed wall along its outline using the current Wall Tool settings.
+  Pattern fill is undoable via Ctrl+Z; wall placement is not undoable (pending
+  a Dungeondraft API solution for wall node deletion).
+
+### Removed
+- Wall undo/redo (`WallBuildRecord`, `RoomBuildRecord`) — removed until a reliable
+  deletion API is available. `WallBuilder` no longer records history.
+
+---
+
 ## [1.0.3] — 2026-02-24
 
 ### Added

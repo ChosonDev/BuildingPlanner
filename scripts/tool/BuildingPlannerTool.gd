@@ -29,18 +29,24 @@ var cached_camera = null
 var _pattern_fill = null   # PatternFill
 var _wall_builder = null   # WallBuilder
 var _mirror_mode  = null   # MirrorMode
+var _room_builder = null   # RoomBuilder
 
 # ============================================================================
 # STATE
 # ============================================================================
 
-enum Mode { NONE, PATTERN_FILL, WALL_BUILDER, MIRROR }
+enum Mode { NONE, PATTERN_FILL, WALL_BUILDER, MIRROR, ROOM_BUILDER }
 
 var _active_mode: int = Mode.PATTERN_FILL  # Default to first mode
 var is_enabled: bool = false
 
 # Active marker id used by Wall Builder and Mirror Mode (entered via UI SpinBox)
 var active_marker_id: int = -1
+
+# Snapshot of GuidesLines tool state captured on Enable().
+# Refreshed once per activation cycle — both tools cannot be active simultaneously,
+# so the state cannot change while BuildingPlanner is the active tool.
+var gl_tool_state: Dictionary = {}
 
 # ============================================================================
 # INPUT OVERLAY
@@ -91,9 +97,10 @@ func _on_api_registered(api_id, _api):
 # Called once when GuidesLinesApi becomes available.
 func _init_features():
 	var root = parent_mod.Global.Root
-	var PatternFillClass = ResourceLoader.load(root + "scripts/features/PatternFill.gd", "GDScript", false)
-	var WallBuilderClass = ResourceLoader.load(root + "scripts/features/WallBuilder.gd", "GDScript", false)
-	var MirrorModeClass  = ResourceLoader.load(root + "scripts/features/MirrorMode.gd",  "GDScript", false)
+	var PatternFillClass = ResourceLoader.load(root + "scripts/features/PatternFill.gd",  "GDScript", false)
+	var WallBuilderClass = ResourceLoader.load(root + "scripts/features/WallBuilder.gd",  "GDScript", false)
+	var MirrorModeClass  = ResourceLoader.load(root + "scripts/features/MirrorMode.gd",   "GDScript", false)
+	var RoomBuilderClass = ResourceLoader.load(root + "scripts/features/RoomBuilder.gd",  "GDScript", false)
 
 	if PatternFillClass:
 		_pattern_fill = PatternFillClass.new(_gl_api, LOGGER, parent_mod)
@@ -110,6 +117,11 @@ func _init_features():
 	elif LOGGER:
 		LOGGER.warn("%s: Failed to load MirrorMode.gd" % CLASS_NAME)
 
+	if RoomBuilderClass:
+		_room_builder = RoomBuilderClass.new(_gl_api, LOGGER, parent_mod)
+	elif LOGGER:
+		LOGGER.warn("%s: Failed to load RoomBuilder.gd" % CLASS_NAME)
+
 	if LOGGER:
 		LOGGER.info("%s: features initialised." % CLASS_NAME)
 
@@ -120,12 +132,20 @@ func _init_features():
 # Called when this tool becomes active in the Dungeondraft toolset.
 func Enable():
 	is_enabled = true
+	# Capture GuidesLines state once — it cannot change while we are the active tool
+	if _gl_api:
+		gl_tool_state = _gl_api.get_tool_state()
 	# Lazily build the pattern GridMenu now that the Editor is definitely ready
 	if _ui and _ui.has_method("_try_build_grid_menu"):
 		_ui._try_build_grid_menu()
 	# Lazily build the wall texture GridMenu
 	if _ui and _ui.has_method("_try_build_wb_grid_menu"):
 		_ui._try_build_wb_grid_menu()
+	# Lazily build Room Builder pattern and wall GridMenus
+	if _ui and _ui.has_method("_try_build_rb_pattern_grid_menu"):
+		_ui._try_build_rb_pattern_grid_menu()
+	if _ui and _ui.has_method("_try_build_rb_wall_grid_menu"):
+		_ui._try_build_rb_wall_grid_menu()
 	# Restore the active mode from the UI selector (was reset to NONE on Disable)
 	if _ui and _ui._mode_selector:
 		var mode = _ui._mode_selector.get_item_id(_ui._mode_selector.selected)
@@ -144,6 +164,14 @@ func Disable():
 	# Return the borrowed wall GridMenu before we disappear
 	if _ui and _ui.has_method("release_wb_grid_menu"):
 		_ui.release_wb_grid_menu()
+	# Return Room Builder GridMenus
+	if _ui and _ui.has_method("release_rb_pattern_grid_menu"):
+		_ui.release_rb_pattern_grid_menu()
+	if _ui and _ui.has_method("release_rb_wall_grid_menu"):
+		_ui.release_rb_wall_grid_menu()
+	# Clear Room Builder preview if it was active
+	if _room_builder:
+		_room_builder.stop_preview()
 	_destroy_overlay()
 
 # Called every frame while the mod is loaded (from BuildingPlanner.gd).
@@ -151,6 +179,14 @@ func Update(_delta):
 	# Create the input overlay once WorldUI is available (even before Enable)
 	if not _overlay and cached_worldui:
 		_create_overlay()
+
+	# Drive Room Builder preview every frame while active
+	if is_enabled and _active_mode == Mode.ROOM_BUILDER and _room_builder and cached_worldui:
+		# Match GuidesLines MarkerOverlay logic: IsInsideBounds alone is not enough —
+		# viewport x < 450 means the cursor is over the left tool panel (UI area).
+		var vp_mouse: Vector2 = cached_worldui.get_viewport().get_mouse_position()
+		var cursor_in_ui: bool = not cached_worldui.IsInsideBounds or vp_mouse.x < 450
+		_room_builder.update_preview(cached_worldui.MousePosition, cursor_in_ui, gl_tool_state)
 
 # ============================================================================
 # OVERLAY
@@ -196,6 +232,9 @@ func create_ui_panel():
 # ============================================================================
 
 func _set_mode(mode: int):
+	# Clear Room Builder preview when leaving that mode
+	if _active_mode == Mode.ROOM_BUILDER and mode != Mode.ROOM_BUILDER and _room_builder:
+		_room_builder.stop_preview()
 	_active_mode = mode
 
 # ============================================================================
@@ -215,6 +254,13 @@ func handle_wall_builder_click(world_pos: Vector2) -> void:
 		if LOGGER: LOGGER.error("%s: WallBuilder module not loaded." % CLASS_NAME)
 		return
 	_wall_builder.build_at(world_pos)
+
+## Called by BuildingPlannerOverlay when the user left-clicks in Room Builder mode.
+func handle_room_builder_click(world_pos: Vector2) -> void:
+	if not _room_builder:
+		if LOGGER: LOGGER.error("%s: RoomBuilder module not loaded." % CLASS_NAME)
+		return
+	_room_builder.build_room_at(world_pos, gl_tool_state)
 
 ## Activates or deactivates Mirror Mode on the active marker.
 func execute_mirror_toggle() -> bool:

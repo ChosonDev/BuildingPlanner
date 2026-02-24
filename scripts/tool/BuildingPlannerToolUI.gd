@@ -29,6 +29,7 @@ const MODE_NONE          = 0
 const MODE_PATTERN_FILL  = 1
 const MODE_WALL_BUILDER  = 2
 const MODE_MIRROR        = 3
+const MODE_ROOM_BUILDER  = 4
 
 # ============================================================================
 # REFERENCES
@@ -63,6 +64,22 @@ var _wb_bevel_check         = null
 var _mm_section             = null
 var _mm_marker_spin         = null
 var _mm_toggle_button       = null
+
+# Room Builder section
+var _rb_section               = null
+var _rb_pattern_grid_menu     = null   # Our mirror ItemList for patterns (owned)
+var _rb_pattern_index_to_path = {}     # {int index -> String resource_path}
+var _rb_pattern_menu_container = null  # VBoxContainer placeholder
+var _rb_color_picker          = null
+var _rb_rotation_spin         = null
+var _rb_layer_spin            = null
+var _rb_outline_check         = null
+var _rb_wall_grid_menu        = null   # Our mirror ItemList for walls (owned)
+var _rb_wall_index_to_path    = {}     # {int index -> String resource_path}
+var _rb_wall_menu_container   = null   # VBoxContainer placeholder
+var _rb_wall_source_menu      = null   # WallTool Controls["Texture"] GridMenu reference
+var _rb_shadow_check          = null
+var _rb_bevel_check           = null
 
 # ============================================================================
 # INIT
@@ -102,6 +119,7 @@ func build(panel):
 	_mode_selector.add_item("Pattern Fill",  MODE_PATTERN_FILL)
 	_mode_selector.add_item("Wall Builder",  MODE_WALL_BUILDER)
 	_mode_selector.add_item("Mirror Mode",   MODE_MIRROR)
+	_mode_selector.add_item("Room Builder",  MODE_ROOM_BUILDER)
 	_mode_selector.selected = 0
 	_mode_selector.connect("item_selected", self, "_on_mode_selected")
 	root.add_child(_mode_selector)
@@ -117,6 +135,9 @@ func build(panel):
 
 	_mm_section = _build_mirror_mode_section()
 	root.add_child(_mm_section)
+
+	_rb_section = _build_room_builder_section()
+	root.add_child(_rb_section)
 
 	# Show only the first mode's section
 	_show_section(MODE_PATTERN_FILL)
@@ -418,6 +439,73 @@ func _build_mirror_mode_section() -> VBoxContainer:
 
 	return sec
 
+
+func _build_room_builder_section() -> VBoxContainer:
+	var sec = VBoxContainer.new()
+	sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	# --- Pattern subsection ---
+	sec.add_child(_row_label("Pattern:"))
+	_rb_pattern_menu_container = VBoxContainer.new()
+	_rb_pattern_menu_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sec.add_child(_rb_pattern_menu_container)
+
+	sec.add_child(_spacer(4))
+
+	sec.add_child(_row_label("Color:"))
+	_rb_color_picker = ColorPickerButton.new()
+	_rb_color_picker.color = Color.white
+	_rb_color_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rb_color_picker.connect("color_changed", self, "_on_rb_color_changed")
+	sec.add_child(_rb_color_picker)
+
+	sec.add_child(_row_label("Rotation (deg):"))
+	_rb_rotation_spin = SpinBox.new()
+	_rb_rotation_spin.min_value = 0
+	_rb_rotation_spin.max_value = 360
+	_rb_rotation_spin.step = 1
+	_rb_rotation_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rb_rotation_spin.connect("value_changed", self, "_on_rb_rotation_changed")
+	sec.add_child(_rb_rotation_spin)
+
+	sec.add_child(_row_label("Layer:"))
+	_rb_layer_spin = SpinBox.new()
+	_rb_layer_spin.min_value = 0
+	_rb_layer_spin.max_value = 9
+	_rb_layer_spin.step = 1
+	_rb_layer_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rb_layer_spin.connect("value_changed", self, "_on_rb_layer_changed")
+	sec.add_child(_rb_layer_spin)
+
+	_rb_outline_check = CheckButton.new()
+	_rb_outline_check.text = "Outline"
+	_rb_outline_check.connect("toggled", self, "_on_rb_outline_toggled")
+	sec.add_child(_rb_outline_check)
+
+	sec.add_child(_separator())
+
+	# --- Wall subsection ---
+	sec.add_child(_row_label("Wall:"))
+	_rb_wall_menu_container = VBoxContainer.new()
+	_rb_wall_menu_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sec.add_child(_rb_wall_menu_container)
+
+	sec.add_child(_spacer(4))
+
+	_rb_shadow_check = CheckButton.new()
+	_rb_shadow_check.text = "Shadow"
+	_rb_shadow_check.pressed = true
+	_rb_shadow_check.connect("toggled", self, "_on_rb_shadow_toggled")
+	sec.add_child(_rb_shadow_check)
+
+	_rb_bevel_check = CheckButton.new()
+	_rb_bevel_check.text = "Bevel corners"
+	_rb_bevel_check.pressed = true
+	_rb_bevel_check.connect("toggled", self, "_on_rb_bevel_toggled")
+	sec.add_child(_rb_bevel_check)
+
+	return sec
+
 # ============================================================================
 # SECTION VISIBILITY
 # ============================================================================
@@ -426,6 +514,7 @@ func _show_section(mode: int):
 	if _pf_section: _pf_section.visible = (mode == MODE_PATTERN_FILL)
 	if _wb_section: _wb_section.visible = (mode == MODE_WALL_BUILDER)
 	if _mm_section: _mm_section.visible = (mode == MODE_MIRROR)
+	if _rb_section: _rb_section.visible = (mode == MODE_ROOM_BUILDER)
 
 # ============================================================================
 # CALLBACKS — MODE
@@ -501,6 +590,172 @@ func _on_mm_toggle_pressed(pressed: bool):
 	if pressed and not ok:
 		_mm_toggle_button.pressed = false
 		_mm_toggle_button.text = "Activate Mirror"
+
+# ============================================================================
+# ROOM BUILDER PATTERN GRID MENU FACTORY
+# ============================================================================
+
+func _try_build_rb_pattern_grid_menu():
+	if _rb_pattern_grid_menu != null or _rb_pattern_menu_container == null:
+		return
+	if not _tool or not _tool.parent_mod:
+		return
+	var gl = _tool.parent_mod.Global
+	if not gl.Editor or not gl.Editor.Tools.has("PatternShapeTool"):
+		return
+	var source_menu = gl.Editor.Tools["PatternShapeTool"].get("textureMenu")
+	if not source_menu:
+		return
+	var count = source_menu.get_item_count()
+	if count == 0:
+		return
+	var lookup = source_menu.get("Lookup")
+	if not lookup or lookup.empty():
+		return
+	_rb_pattern_index_to_path.clear()
+	for path in lookup.keys():
+		_rb_pattern_index_to_path[lookup[path]] = path
+	var scroll = ScrollContainer.new()
+	scroll.rect_min_size = Vector2(0, 160)
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rb_pattern_grid_menu = ItemList.new()
+	_rb_pattern_grid_menu.icon_mode = ItemList.ICON_MODE_TOP
+	_rb_pattern_grid_menu.fixed_icon_size = Vector2(48, 48)
+	_rb_pattern_grid_menu.fixed_column_width = 56
+	_rb_pattern_grid_menu.max_columns = 0
+	_rb_pattern_grid_menu.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rb_pattern_grid_menu.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_rb_pattern_grid_menu.connect("item_selected", self, "_on_rb_pattern_selected")
+	for i in range(count):
+		var icon = source_menu.get_item_icon(i)
+		var tooltip = _rb_pattern_index_to_path.get(i, str(i)).get_file().get_basename()
+		if icon:
+			_rb_pattern_grid_menu.add_item("", icon)
+		else:
+			_rb_pattern_grid_menu.add_item(tooltip)
+		_rb_pattern_grid_menu.set_item_tooltip(_rb_pattern_grid_menu.get_item_count() - 1, tooltip)
+	scroll.add_child(_rb_pattern_grid_menu)
+	_rb_pattern_menu_container.add_child(scroll)
+	_rb_pattern_grid_menu.select(0)
+	_on_rb_pattern_selected(0)
+	if LOGGER: LOGGER.info("%s: RB pattern ItemList built with %d items." % [CLASS_NAME, count])
+
+func release_rb_pattern_grid_menu():
+	if not _rb_pattern_grid_menu:
+		return
+	if _rb_pattern_grid_menu.is_connected("item_selected", self, "_on_rb_pattern_selected"):
+		_rb_pattern_grid_menu.disconnect("item_selected", self, "_on_rb_pattern_selected")
+	for child in _rb_pattern_menu_container.get_children():
+		_rb_pattern_menu_container.remove_child(child)
+		child.queue_free()
+	_rb_pattern_grid_menu = null
+	_rb_pattern_index_to_path.clear()
+
+# ============================================================================
+# ROOM BUILDER WALL GRID MENU FACTORY
+# ============================================================================
+
+func _try_build_rb_wall_grid_menu():
+	if _rb_wall_grid_menu != null or _rb_wall_menu_container == null:
+		return
+	if not _tool or not _tool.parent_mod:
+		return
+	var gl = _tool.parent_mod.Global
+	if not gl.Editor or not gl.Editor.Tools.has("WallTool"):
+		return
+	var controls = gl.Editor.Tools["WallTool"].get("Controls")
+	if not controls or not controls.has("Texture"):
+		return
+	var source_menu = controls["Texture"]
+	if not source_menu:
+		return
+	var count = source_menu.get_item_count()
+	if count == 0:
+		return
+	_rb_wall_source_menu = source_menu
+	var lookup = source_menu.get("Lookup")
+	if not lookup or lookup.empty():
+		return
+	_rb_wall_index_to_path.clear()
+	for path in lookup.keys():
+		_rb_wall_index_to_path[lookup[path]] = path
+	var scroll = ScrollContainer.new()
+	scroll.rect_min_size = Vector2(0, 160)
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rb_wall_grid_menu = ItemList.new()
+	_rb_wall_grid_menu.icon_mode = ItemList.ICON_MODE_TOP
+	_rb_wall_grid_menu.fixed_icon_size = Vector2(48, 48)
+	_rb_wall_grid_menu.fixed_column_width = 56
+	_rb_wall_grid_menu.max_columns = 0
+	_rb_wall_grid_menu.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rb_wall_grid_menu.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_rb_wall_grid_menu.connect("item_selected", self, "_on_rb_wall_texture_selected")
+	for i in range(count):
+		var icon = source_menu.get_item_icon(i)
+		var tooltip = _rb_wall_index_to_path.get(i, str(i)).get_file().get_basename()
+		if icon:
+			_rb_wall_grid_menu.add_item("", icon)
+		else:
+			_rb_wall_grid_menu.add_item(tooltip)
+		_rb_wall_grid_menu.set_item_tooltip(_rb_wall_grid_menu.get_item_count() - 1, tooltip)
+	scroll.add_child(_rb_wall_grid_menu)
+	_rb_wall_menu_container.add_child(scroll)
+	_rb_wall_grid_menu.select(0)
+	_on_rb_wall_texture_selected(0)
+	if LOGGER: LOGGER.info("%s: RB wall ItemList built with %d items." % [CLASS_NAME, count])
+
+func release_rb_wall_grid_menu():
+	if not _rb_wall_grid_menu:
+		return
+	if _rb_wall_grid_menu.is_connected("item_selected", self, "_on_rb_wall_texture_selected"):
+		_rb_wall_grid_menu.disconnect("item_selected", self, "_on_rb_wall_texture_selected")
+	for child in _rb_wall_menu_container.get_children():
+		_rb_wall_menu_container.remove_child(child)
+		child.queue_free()
+	_rb_wall_grid_menu = null
+	_rb_wall_source_menu = null
+	_rb_wall_index_to_path.clear()
+
+# ============================================================================
+# CALLBACKS — ROOM BUILDER
+# ============================================================================
+
+func _on_rb_pattern_selected(index: int):
+	if not _tool._room_builder:
+		return
+	var path: String = _rb_pattern_index_to_path.get(index, "")
+	if path == "":
+		return
+	var tex = ResourceLoader.load(path, "Texture", false)
+	_tool._room_builder.active_texture = tex
+
+func _on_rb_color_changed(color: Color):
+	if _tool._room_builder:
+		_tool._room_builder.active_color = color
+
+func _on_rb_rotation_changed(value: float):
+	if _tool._room_builder:
+		_tool._room_builder.active_rotation = value
+
+func _on_rb_layer_changed(value: float):
+	if _tool._room_builder:
+		_tool._room_builder.active_layer = int(value)
+
+func _on_rb_outline_toggled(pressed: bool):
+	if _tool._room_builder:
+		_tool._room_builder.active_outline = pressed
+
+func _on_rb_wall_texture_selected(index: int):
+	if _rb_wall_source_menu and _rb_wall_source_menu.has_method("OnItemSelected"):
+		_rb_wall_source_menu.OnItemSelected(index)
+
+func _on_rb_shadow_toggled(pressed: bool):
+	if _tool._room_builder:
+		_tool._room_builder.active_shadow = pressed
+
+func _on_rb_bevel_toggled(pressed: bool):
+	if _tool._room_builder:
+		_tool._room_builder.active_joint = 1 if pressed else 0
 
 # ============================================================================
 # HELPERS

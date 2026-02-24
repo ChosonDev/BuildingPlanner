@@ -14,7 +14,6 @@ extends Reference
 # Requires GuidesLines >= 2.2.0 (compute_fill_polygon).
 
 const CLASS_NAME = "WallBuilder"
-const BuildingPlannerHistory = preload("../tool/BuildingPlannerHistory.gd")
 
 # ============================================================================
 # REFERENCES
@@ -113,22 +112,5 @@ func build_at(coords: Vector2) -> bool:
 		if LOGGER: LOGGER.warn("%s: AddWall returned null." % CLASS_NAME)
 		return false
 
-	# --- Record undo/redo history ---
-	_record_history(BuildingPlannerHistory.WallBuildRecord.new(_parent_mod, LOGGER, new_wall))
-
 	if LOGGER: LOGGER.info("%s: wall built with %d points." % [CLASS_NAME, polygon.size()])
 	return true
-
-# ============================================================================
-# HISTORY HELPERS
-# ============================================================================
-
-## Records [record] into the HistoryApi (undo/redo stack) if available.
-func _record_history(record) -> void:
-	if not _parent_mod:
-		return
-	var api = _parent_mod.Global.API
-	if api and api.has("HistoryApi"):
-		api.HistoryApi.record(record, 100)
-	elif LOGGER:
-		LOGGER.warn("%s: HistoryApi not available — action will not be undoable." % CLASS_NAME)
