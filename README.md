@@ -18,10 +18,6 @@ Dungeondraft terrain pattern. Configure color, rotation, layer, and outline in t
 Trace the outline of a Shape or Path marker with walls.
 Supports closed loops (Shape) and open segments (Path).
 
-### Mirror Mode *(coming soon)*
-Activate an axis by selecting a Line marker. Everything placed while Mirror Mode is active
-is automatically duplicated on the opposite side.
-
 ## Requirements
 
 - [CreepyCre._Lib](https://github.com/CreepyCre/_Lib)

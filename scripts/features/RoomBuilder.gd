@@ -42,6 +42,7 @@ var active_outline:  bool  = false
 
 var active_shadow: bool = true
 var active_joint:  int  = 1           # 0 = Sharp, 1 = Bevel, 2 = Round
+var active_wall_color: Color = Color.white
 
 # ============================================================================
 # INIT
@@ -204,11 +205,9 @@ func _build_wall(polygon: Array):
 		return null
 
 	var wall_texture = null
-	var wall_color: Color = Color.white
 	if _global.Editor and _global.Editor.Tools.has("WallTool"):
 		var wt = _global.Editor.Tools["WallTool"]
 		wall_texture = wt.Texture
-		wall_color   = wt.Color
 	else:
 		if LOGGER: LOGGER.warn("%s: WallTool not found, using defaults." % CLASS_NAME)
 
@@ -220,7 +219,7 @@ func _build_wall(polygon: Array):
 	var new_wall = walls.AddWall(
 		PoolVector2Array(polygon),
 		wall_texture,
-		wall_color,
+		active_wall_color,
 		true,           # loop = closed contour
 		active_shadow,
 		0,              # type = Auto

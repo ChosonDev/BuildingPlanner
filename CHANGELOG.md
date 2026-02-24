@@ -5,6 +5,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.5] — 2026-02-24
+
+### Added
+- **Grid snap support for Room Builder.** Click position is now snapped to the
+  grid when Dungeondraft snapping is enabled (`Editor.IsSnapping`). Supports the
+  optional **Lievven.Snappy_Mod** for custom snap intervals (detected once at map
+  load via `ModRegistry`, same pattern as GuidesLines).
+- **Wall color picker.** `WallPanel` (UI) and `WallBuilder` / `RoomBuilder`
+  (features) now expose an independent color setting for walls, replacing the
+  previous read of `WallTool.Color` at click time.
+
+### Removed
+- **Mirror Mode** — feature stub and all related code removed (UI section,
+  `MirrorMode.gd`, `MirrorPlacementRecord`, `execute_mirror_toggle()`).
+
+### Refactored
+- `BuildingPlannerToolUI` split into two reusable inner classes **`PatternPanel`**
+  and **`WallPanel`**, eliminating duplicated grid-menu factory code that existed
+  separately for Pattern Fill, Wall Builder, and Room Builder sections.
+
+---
+
 ## [1.0.4] — 2026-02-24
 
 ### Added

@@ -21,6 +21,7 @@ var parent_mod = null
 var cached_world = null
 var cached_worldui = null
 var cached_camera = null
+var cached_snappy_mod = null   # Lievven.Snappy_Mod reference (or null)
 
 # ============================================================================
 # FEATURE MODULES
@@ -28,20 +29,16 @@ var cached_camera = null
 
 var _pattern_fill = null   # PatternFill
 var _wall_builder = null   # WallBuilder
-var _mirror_mode  = null   # MirrorMode
 var _room_builder = null   # RoomBuilder
 
 # ============================================================================
 # STATE
 # ============================================================================
 
-enum Mode { NONE, PATTERN_FILL, WALL_BUILDER, MIRROR, ROOM_BUILDER }
+enum Mode { NONE, PATTERN_FILL, WALL_BUILDER, ROOM_BUILDER }
 
 var _active_mode: int = Mode.PATTERN_FILL  # Default to first mode
 var is_enabled: bool = false
-
-# Active marker id used by Wall Builder and Mirror Mode (entered via UI SpinBox)
-var active_marker_id: int = -1
 
 # Snapshot of GuidesLines tool state captured on Enable().
 # Refreshed once per activation cycle — both tools cannot be active simultaneously,
@@ -99,7 +96,6 @@ func _init_features():
 	var root = parent_mod.Global.Root
 	var PatternFillClass = ResourceLoader.load(root + "scripts/features/PatternFill.gd",  "GDScript", false)
 	var WallBuilderClass = ResourceLoader.load(root + "scripts/features/WallBuilder.gd",  "GDScript", false)
-	var MirrorModeClass  = ResourceLoader.load(root + "scripts/features/MirrorMode.gd",   "GDScript", false)
 	var RoomBuilderClass = ResourceLoader.load(root + "scripts/features/RoomBuilder.gd",  "GDScript", false)
 
 	if PatternFillClass:
@@ -111,11 +107,6 @@ func _init_features():
 		_wall_builder = WallBuilderClass.new(_gl_api, LOGGER, parent_mod)
 	elif LOGGER:
 		LOGGER.warn("%s: Failed to load WallBuilder.gd" % CLASS_NAME)
-
-	if MirrorModeClass:
-		_mirror_mode = MirrorModeClass.new(_gl_api, LOGGER)
-	elif LOGGER:
-		LOGGER.warn("%s: Failed to load MirrorMode.gd" % CLASS_NAME)
 
 	if RoomBuilderClass:
 		_room_builder = RoomBuilderClass.new(_gl_api, LOGGER, parent_mod)
@@ -135,17 +126,9 @@ func Enable():
 	# Capture GuidesLines state once — it cannot change while we are the active tool
 	if _gl_api:
 		gl_tool_state = _gl_api.get_tool_state()
-	# Lazily build the pattern GridMenu now that the Editor is definitely ready
-	if _ui and _ui.has_method("_try_build_grid_menu"):
-		_ui._try_build_grid_menu()
-	# Lazily build the wall texture GridMenu
-	if _ui and _ui.has_method("_try_build_wb_grid_menu"):
-		_ui._try_build_wb_grid_menu()
-	# Lazily build Room Builder pattern and wall GridMenus
-	if _ui and _ui.has_method("_try_build_rb_pattern_grid_menu"):
-		_ui._try_build_rb_pattern_grid_menu()
-	if _ui and _ui.has_method("_try_build_rb_wall_grid_menu"):
-		_ui._try_build_rb_wall_grid_menu()
+	# Lazily build all texture grid menus now that the Editor is definitely ready
+	if _ui and _ui.has_method("try_build_all_grid_menus"):
+		_ui.try_build_all_grid_menus()
 	# Restore the active mode from the UI selector (was reset to NONE on Disable)
 	if _ui and _ui._mode_selector:
 		var mode = _ui._mode_selector.get_item_id(_ui._mode_selector.selected)
@@ -158,17 +141,9 @@ func Disable():
 	is_enabled = false
 	# Do NOT reset _active_mode here — the overlay already guards on is_enabled,
 	# and we need the mode to survive Disable/Enable cycles (e.g. SelectTool round-trip).
-	# Return the borrowed pattern GridMenu before we disappear
-	if _ui and _ui.has_method("release_grid_menu"):
-		_ui.release_grid_menu()
-	# Return the borrowed wall GridMenu before we disappear
-	if _ui and _ui.has_method("release_wb_grid_menu"):
-		_ui.release_wb_grid_menu()
-	# Return Room Builder GridMenus
-	if _ui and _ui.has_method("release_rb_pattern_grid_menu"):
-		_ui.release_rb_pattern_grid_menu()
-	if _ui and _ui.has_method("release_rb_wall_grid_menu"):
-		_ui.release_rb_wall_grid_menu()
+	# Return all borrowed texture grid menus before we disappear
+	if _ui and _ui.has_method("release_all_grid_menus"):
+		_ui.release_all_grid_menus()
 	# Clear Room Builder preview if it was active
 	if _room_builder:
 		_room_builder.stop_preview()
@@ -262,15 +237,17 @@ func handle_room_builder_click(world_pos: Vector2) -> void:
 		return
 	_room_builder.build_room_at(world_pos, gl_tool_state)
 
-## Activates or deactivates Mirror Mode on the active marker.
-func execute_mirror_toggle() -> bool:
-	if not _mirror_mode:
-		if LOGGER: LOGGER.error("%s: MirrorMode module not loaded." % CLASS_NAME)
-		return false
-	if _mirror_mode.is_active():
-		_mirror_mode.deactivate()
-		return false
-	if active_marker_id < 0:
-		if LOGGER: LOGGER.warn("%s: no marker selected for Mirror Mode." % CLASS_NAME)
-		return false
-	return _mirror_mode.activate(active_marker_id)
+# ============================================================================
+# SNAP
+# ============================================================================
+
+## Snaps [position] to the grid.
+## Uses Snappy Mod (get_snapped_position) when available,
+## otherwise falls back to vanilla WorldUI.GetSnappedPosition.
+func snap_position_to_grid(position: Vector2) -> Vector2:
+	if cached_snappy_mod and cached_snappy_mod.has_method("get_snapped_position"):
+		return cached_snappy_mod.get_snapped_position(position)
+	if cached_worldui:
+		return cached_worldui.GetSnappedPosition(position)
+	return position
+

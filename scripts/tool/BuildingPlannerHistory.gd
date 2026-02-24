@@ -87,35 +87,3 @@ class PatternFillRecord:
 	func record_type() -> String:
 		return "BuildingPlanner.PatternFill"
 
-# ============================================================================
-# MIRROR PLACEMENT RECORD
-# ============================================================================
-
-class MirrorPlacementRecord:
-	var _parent_mod
-	var LOGGER
-	var axis_marker_id: int
-	var original_object_id
-	var mirrored_object_id
-
-	func _init(p_mod, logger, axis_id: int, orig_id, mirror_id):
-		_parent_mod = p_mod
-		LOGGER = logger
-		axis_marker_id = axis_id
-		original_object_id = orig_id
-		mirrored_object_id = mirror_id
-		if LOGGER:
-			LOGGER.debug("MirrorPlacementRecord created (axis=%d)." % [axis_id])
-
-	func undo():
-		pass  # TODO: remove both original and mirrored objects
-
-	func redo():
-		pass  # TODO: re-place both objects
-
-	func dropped(_type: int) -> void:
-		pass
-
-	func record_type() -> String:
-		return "BuildingPlanner.MirrorPlacement"
-

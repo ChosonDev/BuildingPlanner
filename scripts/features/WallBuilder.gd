@@ -10,7 +10,7 @@ extends Reference
 #   4. Walls.AddWall(polygon, ...) creates the closed wall outline.
 #
 # Texture source: WallTool.Controls["Texture"] GridMenu (mirrored in our own ItemList).
-# Color source:   WallTool.Color (read at click time).
+# Color source:   active_color (set from UI color picker, default white).
 # Requires GuidesLines >= 2.2.0 (compute_fill_polygon).
 
 const CLASS_NAME = "WallBuilder"
@@ -27,10 +27,11 @@ var _parent_mod = null
 # SETTINGS
 # ============================================================================
 
-# Texture and color are always read from WallTool at click time,
-# so selecting in our GridMenu drives WallTool.Texture via OnItemSelected.
+# Texture is always read from WallTool at click time (our GridMenu drives it via
+# OnItemSelected). Color is stored here so the UI color picker has effect.
+var active_color:  Color = Color.white
 var active_shadow: bool = true
-var active_joint: int = 1    # 0 = Sharp, 1 = Bevel, 2 = Round
+var active_joint:  int  = 1    # 0 = Sharp, 1 = Bevel, 2 = Round
 
 # ============================================================================
 # INIT
@@ -83,11 +84,9 @@ func build_at(coords: Vector2) -> bool:
 		return false
 
 	var wall_texture = null
-	var wall_color: Color = Color.white
 	if _global.Editor and _global.Editor.Tools.has("WallTool"):
 		var wt = _global.Editor.Tools["WallTool"]
 		wall_texture = wt.Texture
-		wall_color = wt.Color
 	else:
 		if LOGGER: LOGGER.warn("%s: WallTool not found, using defaults." % CLASS_NAME)
 
@@ -100,7 +99,7 @@ func build_at(coords: Vector2) -> bool:
 	var new_wall = walls.AddWall(
 		PoolVector2Array(polygon),
 		wall_texture,
-		wall_color,
+		active_color,
 		true,            # loop = true → closed contour
 		active_shadow,
 		0,               # type = Auto

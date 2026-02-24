@@ -8,7 +8,6 @@
 #   - scripts/tool/BuildingPlannerHistory.gd: Undo/redo history record classes
 #   - scripts/features/PatternFill.gd: Feature — fill Shape marker area with pattern
 #   - scripts/features/WallBuilder.gd: Feature — place walls along marker outline
-#   - scripts/features/MirrorMode.gd: Feature — mirror placement across Line marker
 #   - scripts/utils/BuildingPlannerUtils.gd: Shared geometry and helper functions
 
 var script_class = "tool"
@@ -41,6 +40,15 @@ var _tool = null
 var _tool_created = false
 
 # ============================================================================
+# SNAPPY MOD
+# ============================================================================
+
+# Reference to Lievven.Snappy_Mod (optional custom snap mod).
+# Detected once after the first map load; never changes during a session.
+var _cached_snappy_mod = null
+var _snappy_mod_checked = false
+
+# ============================================================================
 # LIFECYCLE
 # ============================================================================
 
@@ -52,7 +60,7 @@ func start():
 
 		if self.Global.API and self.Global.API.has("Logger"):
 			LOGGER = self.Global.API.Logger.for_class(CLASS_NAME)
-			LOGGER.info("Mod starting - version 1.0.4")
+			LOGGER.info("Mod starting - version 1.0.5")
 		else:
 			print("BuildingPlanner: _Lib registered but Logger not available")
 	else:
@@ -83,11 +91,30 @@ func update(_delta):
 	if Global.World == null or Global.WorldUI == null:
 		return
 
+	# Detect Snappy Mod once after the map is loaded.
+	# Mods are registered before map creation and do not change during a session,
+	# so a single check per session is sufficient.
+	if not _snappy_mod_checked:
+		if Global.API and Global.API.has("ModRegistry"):
+			var registered = Global.API.ModRegistry.get_registered_mods()
+			if registered.has("Lievven.Snappy_Mod"):
+				var mod_info = registered["Lievven.Snappy_Mod"]
+				if mod_info.mod:
+					_cached_snappy_mod = mod_info.mod
+					if LOGGER:
+						var mod_name = mod_info.mod_meta.get("name", "Snappy Mod")
+						var mod_version = mod_info.mod_meta.get("version", "unknown")
+						LOGGER.info("%s: Snappy Mod found (%s v%s)" % [CLASS_NAME, mod_name, mod_version])
+			if not _cached_snappy_mod and LOGGER:
+				LOGGER.debug("%s: Snappy Mod not found, using vanilla grid snapping" % CLASS_NAME)
+		_snappy_mod_checked = true
+
 	if _tool:
 		# Refresh cached world references every frame
 		_tool.cached_world = Global.World
 		_tool.cached_worldui = Global.WorldUI
 		_tool.cached_camera = Global.Camera
+		_tool.cached_snappy_mod = _cached_snappy_mod
 
 		# Drive Enable/Disable based on the active tool name
 		var is_active = Global.Editor.ActiveToolName == "BuildingPlannerTool"

@@ -50,5 +50,11 @@ func _input(event: InputEvent) -> void:
 			tool.handle_wall_builder_click(world_pos)
 			get_tree().set_input_as_handled()
 		tool.Mode.ROOM_BUILDER:
-			tool.handle_room_builder_click(world_pos)
+			# Apply grid snap when enabled — same logic as GuidesLines.
+			# PatternFill and WallBuilder find shapes by position (compute_fill_polygon),
+			# so snapping does not apply there.
+			var final_pos = world_pos
+			if tool.parent_mod.Global.Editor.IsSnapping:
+				final_pos = tool.snap_position_to_grid(world_pos)
+			tool.handle_room_builder_click(final_pos)
 			get_tree().set_input_as_handled()
