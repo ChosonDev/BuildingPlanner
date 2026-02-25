@@ -144,10 +144,10 @@ func Disable():
 	# Return all borrowed texture grid menus before we disappear
 	if _ui and _ui.has_method("release_all_grid_menus"):
 		_ui.release_all_grid_menus()
-	# Clear Room Builder preview and purge object registry
+	# Clear Room Builder preview — registry is intentionally kept alive so
+	# Merge mode can still clean up stale fills/walls after a tool switch.
 	if _room_builder:
 		_room_builder.stop_preview()
-		_room_builder.on_disabled()
 	_destroy_overlay()
 
 # Called every frame while the mod is loaded (from BuildingPlanner.gd).

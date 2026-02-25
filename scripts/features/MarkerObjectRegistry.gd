@@ -74,7 +74,8 @@ func cleanup(marker_id: int) -> Dictionary:
 	return snapshot
 
 ## Completely wipe the registry without touching the scene.
-## Call on tool deactivation / map close.
+## Call on map close/unload only — do NOT call on tool deactivation,
+## otherwise Merge mode loses its marker→object associations.
 func clear() -> void:
 	_registry.clear()
 	if LOGGER:

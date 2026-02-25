@@ -33,9 +33,10 @@ class PatternPanel:
 	var LOGGER = null
 
 	# ---- UI nodes ----
-	var _menu_container = null   # VBoxContainer — placeholder for the scroll
-	var _grid_menu      = null   # ItemList (owned)
-	var _index_to_path  = {}     # { int index -> String resource_path }
+	var _menu_container  = null   # VBoxContainer — placeholder for the scroll
+	var _grid_menu       = null   # ItemList (owned)
+	var _index_to_path   = {}     # { int index -> String resource_path }
+	var _selected_index: int = 0  # persists across release/rebuild cycles
 
 	var color_picker  = null   # ColorPickerButton
 	var rotation_spin = null   # SpinBox
@@ -164,8 +165,9 @@ class PatternPanel:
 		scroll.add_child(_grid_menu)
 		_menu_container.add_child(scroll)
 
-		_grid_menu.select(0)
-		_on_texture_selected(0)
+		var restore_idx: int = min(_selected_index, count - 1)
+		_grid_menu.select(restore_idx)
+		_on_texture_selected(restore_idx)
 
 		if LOGGER: LOGGER.info("PatternPanel: ItemList built with %d items." % count)
 
@@ -173,6 +175,10 @@ class PatternPanel:
 	func release() -> void:
 		if not _grid_menu:
 			return
+		# Persist current selection before destroying the node
+		var sel: Array = _grid_menu.get_selected_items()
+		if not sel.empty():
+			_selected_index = sel[0]
 		if _grid_menu.is_connected("item_selected", self, "_on_texture_selected"):
 			_grid_menu.disconnect("item_selected", self, "_on_texture_selected")
 		for child in _menu_container.get_children():
@@ -227,10 +233,11 @@ class WallPanel:
 	var LOGGER = null
 
 	# ---- UI nodes ----
-	var _menu_container = null   # VBoxContainer — placeholder for the scroll
-	var _grid_menu      = null   # ItemList (owned)
-	var _index_to_path  = {}     # { int index -> String resource_path }
-	var _source_menu    = null   # WallTool Controls["Texture"] GridMenu reference
+	var _menu_container  = null   # VBoxContainer — placeholder for the scroll
+	var _grid_menu       = null   # ItemList (owned)
+	var _index_to_path   = {}     # { int index -> String resource_path }
+	var _source_menu     = null   # WallTool Controls["Texture"] GridMenu reference
+	var _selected_index: int = 0  # persists across release/rebuild cycles
 
 	var color_picker = null   # ColorPickerButton
 	var shadow_check = null   # CheckButton
@@ -349,8 +356,9 @@ class WallPanel:
 		scroll.add_child(_grid_menu)
 		_menu_container.add_child(scroll)
 
-		_grid_menu.select(0)
-		_on_texture_selected(0)
+		var restore_idx: int = min(_selected_index, count - 1)
+		_grid_menu.select(restore_idx)
+		_on_texture_selected(restore_idx)
 
 		if LOGGER: LOGGER.info("WallPanel: ItemList built with %d items." % count)
 
@@ -358,6 +366,10 @@ class WallPanel:
 	func release() -> void:
 		if not _grid_menu:
 			return
+		# Persist current selection before destroying the node
+		var sel: Array = _grid_menu.get_selected_items()
+		if not sel.empty():
+			_selected_index = sel[0]
 		if _grid_menu.is_connected("item_selected", self, "_on_texture_selected"):
 			_grid_menu.disconnect("item_selected", self, "_on_texture_selected")
 		for child in _menu_container.get_children():

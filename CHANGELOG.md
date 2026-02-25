@@ -5,6 +5,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.7] — 2026-02-25
+
+### Fixed
+- **Merge mode now cleans up `absorbed_marker_ids`.** Fills and walls belonging
+  to markers that were consumed (deleted) during `place_shape_merge` are removed
+  from the scene before new objects are placed.
+- **MarkerObjectRegistry is no longer reset on tool switch.** `on_disabled()` is
+  no longer called from `BuildingPlannerTool.Disable()`, so the marker→objects
+  mapping survives Disable/Enable cycles and Merge mode can still clean up stale
+  objects after returning from another tool.
+- **Pattern and wall selections persist across tool switches.** `PatternPanel` and
+  `WallPanel` now save the selected item index before tearing down the grid menu
+  and restore it when the menu is rebuilt on the next Enable.
+
+---
+
 ## [1.0.6] — 2026-02-25
 
 ### Added

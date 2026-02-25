@@ -249,7 +249,12 @@ func _build_room_merge(coords: Vector2, state: Dictionary) -> bool:
 			"%s: Merge found no overlapping markers — falling back to Single (keep marker)." % CLASS_NAME)
 		return _build_room_single_no_delete(coords, state)
 
-	# ---- 3. Fill + Wall for every merged marker ----
+	# ---- 3. Clean up absorbed markers (deleted during merge) ----
+	var absorbed_ids: Array = merge_result.get("absorbed_marker_ids", [])
+	for absorbed_id in absorbed_ids:
+		_registry.cleanup(absorbed_id)
+
+	# ---- 4. Fill + Wall for every merged marker ----
 	# Use compute_fill_polygon at the updated marker position instead of the raw
 	# new_polygon vertices — this ensures the same world-space format that
 	# DrawPolygon / AddWall expect (identical to Single mode).
@@ -280,7 +285,7 @@ func _build_room_merge(coords: Vector2, state: Dictionary) -> bool:
 		_registry.register(m_id, new_shapes,
 			[new_wall] if new_wall != null else [])
 
-	# ---- 4. Record history ----
+	# ---- 5. Record history ----
 	if not all_new_shapes.empty():
 		_record_history(BuildingPlannerHistory.PatternFillRecord.new(
 			_parent_mod, LOGGER, all_new_shapes))
