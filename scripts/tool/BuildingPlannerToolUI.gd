@@ -36,6 +36,7 @@ class PatternPanel:
 	var _menu_container  = null   # VBoxContainer — placeholder for the scroll
 	var _grid_menu       = null   # ItemList (owned)
 	var _index_to_path   = {}     # { int index -> String resource_path }
+	var _pst             = null   # PatternShapeTool reference — used for GetDefaultColor()
 	var _selected_index: int = 0  # persists across release/rebuild cycles
 
 	var color_picker  = null   # ColorPickerButton
@@ -135,6 +136,8 @@ class PatternPanel:
 			if LOGGER: LOGGER.warn("PatternPanel: GridMenu.Lookup is empty.")
 			return
 
+		_pst = gl.Editor.Tools["PatternShapeTool"]
+
 		# Invert to { index: resource_path }
 		_index_to_path.clear()
 		for path in lookup.keys():
@@ -153,6 +156,8 @@ class PatternPanel:
 		_grid_menu.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		_grid_menu.connect("item_selected", self, "_on_texture_selected")
 
+		# Read DD-assigned default colors via PatternShapeTool.GetDefaultColor(texture).
+		# This is the pattern equivalent of WallTool.GetWallColor(texture).
 		for i in range(count):
 			var icon = source_menu.get_item_icon(i)
 			var tooltip = _index_to_path.get(i, str(i)).get_file().get_basename()
@@ -185,6 +190,7 @@ class PatternPanel:
 			_menu_container.remove_child(child)
 			child.queue_free()
 		_grid_menu = null
+		_pst = null
 		_index_to_path.clear()
 
 	# ---- internal callbacks ----
@@ -197,6 +203,15 @@ class PatternPanel:
 		# asset-tag lookup in SelectTool and SetOptions works correctly.
 		var tex = ResourceLoader.load(path, "Texture", false)
 		if _cb_texture: _cb_texture.call_func(tex)
+		# Sync color picker to the DD default color for this texture.
+		# PatternShapeTool.GetDefaultColor(texture) is the pattern equivalent
+		# of WallTool.GetWallColor(texture).
+		if _pst and _pst.has_method("GetDefaultColor") and tex:
+			var default_color: Color = _pst.GetDefaultColor(tex)
+			if color_picker:
+				color_picker.color = default_color
+			if _cb_color:
+				_cb_color.call_func(default_color)
 
 	func _on_color_changed(color: Color):
 		if _cb_color: _cb_color.call_func(color)

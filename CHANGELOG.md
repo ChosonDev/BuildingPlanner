@@ -5,6 +5,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.9] — 2026-02-25
+
+### Fixed
+- **Pattern color picker now shows the default color for the selected pattern.**
+  Uses `PatternShapeTool.GetDefaultColor(texture)` — the pattern equivalent of
+  `WallTool.GetWallColor(texture)`.
+
+---
+
 ## [1.0.8] — 2026-02-25
 
 ### Fixed
