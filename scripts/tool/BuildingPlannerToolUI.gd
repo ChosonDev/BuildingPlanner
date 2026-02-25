@@ -417,9 +417,10 @@ var _wb_section    = null
 var _wb_wall_panel = null   # WallPanel
 
 # Room Builder section
-var _rb_section       = null
-var _rb_pattern_panel = null   # PatternPanel
-var _rb_wall_panel    = null   # WallPanel
+var _rb_section            = null
+var _rb_sub_mode_selector  = null   # OptionButton
+var _rb_pattern_panel      = null   # PatternPanel
+var _rb_wall_panel         = null   # WallPanel
 
 # ============================================================================
 # INIT
@@ -537,6 +538,21 @@ func _build_wall_builder_section() -> VBoxContainer:
 func _build_room_builder_section() -> VBoxContainer:
 	var sec = VBoxContainer.new()
 	sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	# ---- Sub-mode selector ----
+	var sub_mode_label = Label.new()
+	sub_mode_label.text = "Sub-mode:"
+	sec.add_child(sub_mode_label)
+
+	_rb_sub_mode_selector = OptionButton.new()
+	_rb_sub_mode_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rb_sub_mode_selector.add_item("Single", 0)
+	_rb_sub_mode_selector.add_item("Merge",  1)
+	_rb_sub_mode_selector.selected = 0
+	_rb_sub_mode_selector.connect("item_selected", self, "_on_rb_sub_mode")
+	sec.add_child(_rb_sub_mode_selector)
+
+	sec.add_child(_separator())
 	sec.add_child(_rb_pattern_panel.build())
 	sec.add_child(_separator())
 	sec.add_child(_rb_wall_panel.build())
@@ -658,6 +674,11 @@ func _on_rb_bevel(pressed: bool):
 	if _tool._room_builder:
 		# 0 = Sharp, 1 = Bevel, 2 = Round
 		_tool._room_builder.active_joint = 1 if pressed else 0
+
+func _on_rb_sub_mode(index: int):
+	if _tool._room_builder:
+		var RoomBuilderScript = _tool._room_builder
+		RoomBuilderScript.active_sub_mode = index
 
 # ============================================================================
 # HELPERS

@@ -16,7 +16,8 @@ extends Reference
 # and passed in — both tools cannot be active simultaneously.
 
 const CLASS_NAME = "RoomBuilder"
-const BuildingPlannerHistory = preload("../tool/BuildingPlannerHistory.gd")
+const BuildingPlannerHistory   = preload("../tool/BuildingPlannerHistory.gd")
+const MarkerObjectRegistry     = preload("MarkerObjectRegistry.gd")
 
 # ============================================================================
 # REFERENCES
@@ -25,6 +26,7 @@ const BuildingPlannerHistory = preload("../tool/BuildingPlannerHistory.gd")
 var _gl_api     = null
 var LOGGER      = null
 var _parent_mod = null
+var _registry   = null   # MarkerObjectRegistry
 
 # ============================================================================
 # PATTERN SETTINGS
@@ -52,6 +54,15 @@ func _init(gl_api, logger, parent_mod = null):
 	_gl_api     = gl_api
 	LOGGER      = logger
 	_parent_mod = parent_mod
+	_registry   = MarkerObjectRegistry.new(logger)
+
+# ============================================================================
+# SUB-MODE
+# ============================================================================
+
+enum SubMode { SINGLE = 0, MERGE = 1 }
+
+var active_sub_mode: int = SubMode.SINGLE
 
 # ============================================================================
 # PREVIEW
@@ -91,15 +102,42 @@ func stop_preview() -> void:
 	if _gl_api:
 		_gl_api.clear_shape_preview()
 
+## Called when the tool is deactivated — purges the registry without touching the scene.
+func on_disabled() -> void:
+	_registry.clear()
+
 # ============================================================================
 # BUILD ROOM
 # ============================================================================
 
-## Places a temporary Shape marker at [coords], fills it with the active pattern,
-## builds a wall along its outline, then deletes the marker.
+## Dispatches to the active sub-mode.
 ## [state] is the gl_tool_state snapshot from BuildingPlannerTool.
 ## Returns true on success.
 func build_room_at(coords: Vector2, state: Dictionary) -> bool:
+	match active_sub_mode:
+		SubMode.SINGLE:
+			return _build_room_single(coords, state)
+		SubMode.MERGE:
+			return _build_room_merge(coords, state)
+	return false
+
+# ============================================================================
+# PRIVATE — SUB-MODE IMPLEMENTATIONS
+# ============================================================================
+
+## Single mode: place temporary marker → fill → wall → delete marker.
+func _build_room_single(coords: Vector2, state: Dictionary) -> bool:
+	var result = _build_room_single_impl(coords, state, true)
+	return result
+
+## Single-no-delete: same as Single but the marker is kept (used as Merge fallback).
+func _build_room_single_no_delete(coords: Vector2, state: Dictionary) -> bool:
+	return _build_room_single_impl(coords, state, false)
+
+## Internal implementation for the Single logic.
+## [delete_marker_after] — when false the temporary marker is kept.
+func _build_room_single_impl(coords: Vector2, state: Dictionary,
+		delete_marker_after: bool) -> bool:
 	if not _gl_api:
 		if LOGGER: LOGGER.error("%s: GuidesLinesApi not available." % CLASS_NAME)
 		return false
@@ -137,7 +175,8 @@ func build_room_at(coords: Vector2, state: Dictionary) -> bool:
 	var fill_result = _gl_api.compute_fill_polygon(coords)
 	if typeof(fill_result) != TYPE_DICTIONARY or fill_result.get("polygon", []).empty():
 		if LOGGER: LOGGER.warn("%s: compute_fill_polygon returned empty polygon." % CLASS_NAME)
-		_gl_api.delete_marker(marker_id)
+		if delete_marker_after:
+			_gl_api.delete_marker(marker_id)
 		return false
 
 	var polygon: Array = fill_result["polygon"]
@@ -148,16 +187,106 @@ func build_room_at(coords: Vector2, state: Dictionary) -> bool:
 	# ---- 4. Build wall ----
 	var new_wall = _build_wall(polygon)
 
-	# ---- 5. Delete temporary marker ----
-	_gl_api.delete_marker(marker_id)
+	# ---- 5. Register objects when keeping the marker (potential future merge target) ----
+	if not delete_marker_after:
+		_registry.register(marker_id, new_shapes,
+			[new_wall] if new_wall != null else [])
 
-	# ---- 6. Record history (patterns only; wall undo not supported) ----
+	# ---- 6. Optionally delete temporary marker ----
+	if delete_marker_after:
+		_gl_api.delete_marker(marker_id)
+
+	# ---- 7. Record history (patterns only; wall undo not supported) ----
 	if not new_shapes.empty():
 		_record_history(BuildingPlannerHistory.PatternFillRecord.new(
 			_parent_mod, LOGGER, new_shapes))
 
 	if LOGGER: LOGGER.info("%s: room built at %s with %d polygon points." % [
 		CLASS_NAME, str(coords), polygon.size()])
+	return true
+
+## Merge mode: call place_shape_merge and fill/wall every affected marker.
+## Falls back to Single-no-delete when there are no overlapping markers.
+func _build_room_merge(coords: Vector2, state: Dictionary) -> bool:
+	if not _gl_api:
+		if LOGGER: LOGGER.error("%s: GuidesLinesApi not available." % CLASS_NAME)
+		return false
+
+	if not _parent_mod:
+		if LOGGER: LOGGER.error("%s: parent_mod not set." % CLASS_NAME)
+		return false
+
+	if not _gl_api.has_method("place_shape_merge"):
+		if LOGGER: LOGGER.error(
+			"%s: place_shape_merge not found — update GuidesLines." % CLASS_NAME)
+		return false
+
+	if _gl_api.has_method("is_ready") and not _gl_api.is_ready():
+		if LOGGER: LOGGER.warn("%s: GuidesLinesApi not ready yet." % CLASS_NAME)
+		return false
+
+	if not state.get("ready", false) or state.get("active_marker_type", "") != "Shape":
+		if LOGGER: LOGGER.warn("%s: GuidesLines is not in Shape mode." % CLASS_NAME)
+		return false
+
+	# ---- 1. Attempt merge ----
+	var merge_result: Dictionary = _gl_api.place_shape_merge(
+		coords,
+		state.get("active_shape_radius", 1.0),
+		state.get("active_shape_angle",  0.0),
+		state.get("active_shape_sides",  6)
+	)
+
+	if merge_result.empty():
+		if LOGGER: LOGGER.error("%s: place_shape_merge returned internal failure." % CLASS_NAME)
+		return false
+
+	var affected: Array = merge_result.get("affected_markers", [])
+
+	# ---- 2. Fallback — no overlapping markers: run Single without deleting ----
+	if affected.empty():
+		if LOGGER: LOGGER.info(
+			"%s: Merge found no overlapping markers — falling back to Single (keep marker)." % CLASS_NAME)
+		return _build_room_single_no_delete(coords, state)
+
+	# ---- 3. Fill + Wall for every merged marker ----
+	# Use compute_fill_polygon at the updated marker position instead of the raw
+	# new_polygon vertices — this ensures the same world-space format that
+	# DrawPolygon / AddWall expect (identical to Single mode).
+	var all_new_shapes: Array = []
+	for entry in affected:
+		var m_id: int = entry.get("marker_id", -1)
+		var fill_coords: Vector2 = entry.get("new_position", Vector2.ZERO)
+
+		# Remove stale fills and walls that belong to this marker
+		_registry.cleanup(m_id)
+
+		var fill_result = _gl_api.compute_fill_polygon(fill_coords)
+		var polygon: Array
+		if typeof(fill_result) == TYPE_DICTIONARY and not fill_result.get("polygon", []).empty():
+			polygon = fill_result["polygon"]
+		else:
+			polygon = entry.get("new_polygon", [])
+		if polygon.empty():
+			if LOGGER: LOGGER.warn("%s: could not resolve polygon for merged marker %d." % [
+				CLASS_NAME, m_id])
+			continue
+		var new_shapes: Array = _fill_pattern(polygon)
+		if not new_shapes.empty():
+			all_new_shapes += new_shapes
+		var new_wall = _build_wall(polygon)
+
+		# Register the freshly created objects for this marker
+		_registry.register(m_id, new_shapes,
+			[new_wall] if new_wall != null else [])
+
+	# ---- 4. Record history ----
+	if not all_new_shapes.empty():
+		_record_history(BuildingPlannerHistory.PatternFillRecord.new(
+			_parent_mod, LOGGER, all_new_shapes))
+
+	if LOGGER: LOGGER.info("%s: Merge built %d rooms at %s." % [
+		CLASS_NAME, affected.size(), str(coords)])
 	return true
 
 # ============================================================================

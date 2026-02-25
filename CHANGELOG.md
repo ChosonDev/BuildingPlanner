@@ -5,6 +5,31 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.6] — 2026-02-25
+
+### Added
+- **Room Builder sub-modes: Single and Merge.** A new `OptionButton` in the Room
+  Builder UI lets the user choose between two placement behaviours:
+  - **Single** — existing behaviour: place a temporary Shape marker, fill it with
+    the selected pattern and wall, then delete the marker.
+  - **Merge** — calls `GuidesLinesApi.place_shape_merge()` to union the virtual
+    shape with every overlapping existing Shape marker; fills and walls are placed
+    on each resulting merged polygon. Requires GuidesLines v2.2.5+. Falls back to
+    Single (keeping the marker) when there are no overlapping markers.
+- **MarkerObjectRegistry** (`scripts/features/MarkerObjectRegistry.gd`).
+  Tracks the association between GuidesLines marker ids and the pattern fills /
+  walls created for them. In Merge mode, stale fills and walls from superseded
+  markers are removed from the scene before new ones are placed.
+
+### Changed
+- `RoomBuilder._build_room_single_impl` — in the fallback «keep marker» path the
+  early-error branch no longer deletes the marker when `delete_marker_after` is
+  false.
+- `BuildingPlannerTool.Disable()` now calls `_room_builder.on_disabled()` to
+  purge the `MarkerObjectRegistry` on tool switch.
+
+---
+
 ## [1.0.5] — 2026-02-24
 
 ### Added
