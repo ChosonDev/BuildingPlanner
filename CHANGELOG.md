@@ -5,6 +5,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.8] — 2026-02-25
+
+### Fixed
+- **Wall color picker now shows the default color for the selected wall style.**
+  When a wall texture is selected in the Wall Builder or Room Builder panel, the
+  color picker automatically updates to the style's default color via
+  `WallTool.GetWallColor(texture)`. Previously the picker always showed white
+  regardless of the chosen style.
+- **Wall color is correctly applied from the first click.** The default color is
+  read and propagated to `WallBuilder.active_color` when the grid menu is first
+  built, so walls are no longer placed with white when the user has not manually
+  changed the color.
+
+---
+
 ## [1.0.7] — 2026-02-25
 
 ### Fixed

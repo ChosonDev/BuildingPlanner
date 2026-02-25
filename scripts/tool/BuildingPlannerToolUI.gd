@@ -237,6 +237,7 @@ class WallPanel:
 	var _grid_menu       = null   # ItemList (owned)
 	var _index_to_path   = {}     # { int index -> String resource_path }
 	var _source_menu     = null   # WallTool Controls["Texture"] GridMenu reference
+	var _wall_tool       = null   # WallTool reference — used for GetWallColor()
 	var _selected_index: int = 0  # persists across release/rebuild cycles
 
 	var color_picker = null   # ColorPickerButton
@@ -304,11 +305,13 @@ class WallPanel:
 			return
 
 		# WallTool exposes its GridMenu via Controls["Texture"].
-		var controls = gl.Editor.Tools["WallTool"].get("Controls")
+		var wt = gl.Editor.Tools["WallTool"]
+		var controls = wt.get("Controls")
 		if not controls or not controls.has("Texture"):
 			if LOGGER: LOGGER.warn("WallPanel: WallTool.Controls[Texture] not found.")
 			return
 
+		_wall_tool = wt
 		var source_menu = controls["Texture"]
 		if not source_menu:
 			if LOGGER: LOGGER.warn("WallPanel: WallTool Controls[Texture] is null.")
@@ -377,6 +380,7 @@ class WallPanel:
 			child.queue_free()
 		_grid_menu = null
 		_source_menu = null
+		_wall_tool = null
 		_index_to_path.clear()
 
 	# ---- internal callbacks ----
@@ -384,9 +388,20 @@ class WallPanel:
 	# Wall texture selection drives WallTool directly via OnItemSelected —
 	# same technique used by AdditionalSearchOptions. This avoids guessing the
 	# resource path format (png vs tres) for ResourceLoader.
+	# After selection, read back the default color for this wall style and
+	# sync it to both the color picker and the active_color setting.
 	func _on_texture_selected(index: int):
 		if _source_menu and _source_menu.has_method("OnItemSelected"):
 			_source_menu.OnItemSelected(index)
+		if _wall_tool and _wall_tool.has_method("GetWallColor"):
+			# Pass current texture so GetWallColor returns the style-specific default.
+			# WallTool.Texture is already updated by OnItemSelected above.
+			var wall_texture = _wall_tool.get("Texture")
+			var default_color: Color = _wall_tool.GetWallColor(wall_texture)
+			if color_picker:
+				color_picker.color = default_color
+			if _cb_color:
+				_cb_color.call_func(default_color)
 
 	func _on_color_changed(color: Color):
 		if _cb_color: _cb_color.call_func(color)
