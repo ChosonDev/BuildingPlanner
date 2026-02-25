@@ -5,6 +5,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.10] — 2026-02-25
+
+### Added
+- **Pattern and wall icons in the selection grid are now tinted with their default color.**
+  Uses `GetDefaultColor(texture)` / `GetWallColor(texture)` to apply `set_item_icon_modulate`
+  on each icon when the grid is built.
+
+---
+
 ## [1.0.9] — 2026-02-25
 
 ### Fixed

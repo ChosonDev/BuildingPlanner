@@ -156,8 +156,8 @@ class PatternPanel:
 		_grid_menu.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		_grid_menu.connect("item_selected", self, "_on_texture_selected")
 
-		# Read DD-assigned default colors via PatternShapeTool.GetDefaultColor(texture).
-		# This is the pattern equivalent of WallTool.GetWallColor(texture).
+		# Build items and tint each icon with the DD default color.
+		# ResourceLoader returns the cached texture so this is effectively free.
 		for i in range(count):
 			var icon = source_menu.get_item_icon(i)
 			var tooltip = _index_to_path.get(i, str(i)).get_file().get_basename()
@@ -165,7 +165,13 @@ class PatternPanel:
 				_grid_menu.add_item("", icon)
 			else:
 				_grid_menu.add_item(tooltip)
-			_grid_menu.set_item_tooltip(_grid_menu.get_item_count() - 1, tooltip)
+			var item_idx: int = _grid_menu.get_item_count() - 1
+			_grid_menu.set_item_tooltip(item_idx, tooltip)
+			var path: String = _index_to_path.get(i, "")
+			if path != "" and _pst and _pst.has_method("GetDefaultColor"):
+				var tex = ResourceLoader.load(path, "Texture", false)
+				if tex:
+					_grid_menu.set_item_icon_modulate(item_idx, _pst.GetDefaultColor(tex))
 
 		scroll.add_child(_grid_menu)
 		_menu_container.add_child(scroll)
@@ -362,6 +368,8 @@ class WallPanel:
 		_grid_menu.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		_grid_menu.connect("item_selected", self, "_on_texture_selected")
 
+		# Build items and tint each icon with the DD default color.
+		# ResourceLoader returns the cached texture so this is effectively free.
 		for i in range(count):
 			var icon = source_menu.get_item_icon(i)
 			var tooltip = _index_to_path.get(i, str(i)).get_file().get_basename()
@@ -369,7 +377,13 @@ class WallPanel:
 				_grid_menu.add_item("", icon)
 			else:
 				_grid_menu.add_item(tooltip)
-			_grid_menu.set_item_tooltip(_grid_menu.get_item_count() - 1, tooltip)
+			var item_idx: int = _grid_menu.get_item_count() - 1
+			_grid_menu.set_item_tooltip(item_idx, tooltip)
+			var path: String = _index_to_path.get(i, "")
+			if path != "" and _wall_tool and _wall_tool.has_method("GetWallColor"):
+				var tex = ResourceLoader.load(path, "Texture", false)
+				if tex:
+					_grid_menu.set_item_icon_modulate(item_idx, _wall_tool.GetWallColor(tex))
 
 		scroll.add_child(_grid_menu)
 		_menu_container.add_child(scroll)
