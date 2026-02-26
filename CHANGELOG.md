@@ -5,6 +5,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.1.0] — 2026-02-26
+
+### Added
+- **Custom tool icon** (`icons/BuildingPlanner_Icon_no_outline_32x32.png`) now displayed in the Dungeondraft toolbar.
+
+### Fixed
+- **Merge mode no longer crashes when placing a room on top of an identical existing one.**
+  `_build_room_merge` and `_build_room_single_impl` now call `_sanitize_polygon()` before
+  passing the polygon to `DrawPolygon` / `AddWall`. The sanitizer strips consecutive
+  duplicate / zero-length edges produced by `place_shape_merge` when two congruent shapes
+  are merged, preventing the *"Please create a shape that does not intersect upon itself"* error.
+
+---
+
 ## [1.0.10] — 2026-02-25
 
 ### Added

@@ -179,7 +179,12 @@ func _build_room_single_impl(coords: Vector2, state: Dictionary,
 			_gl_api.delete_marker(marker_id)
 		return false
 
-	var polygon: Array = fill_result["polygon"]
+	var polygon: Array = _sanitize_polygon(fill_result["polygon"])
+	if polygon.empty():
+		if LOGGER: LOGGER.warn("%s: polygon is degenerate after sanitize." % CLASS_NAME)
+		if delete_marker_after:
+			_gl_api.delete_marker(marker_id)
+		return false
 
 	# ---- 3. Fill with pattern ----
 	var new_shapes: Array = _fill_pattern(polygon)
@@ -272,8 +277,9 @@ func _build_room_merge(coords: Vector2, state: Dictionary) -> bool:
 			polygon = fill_result["polygon"]
 		else:
 			polygon = entry.get("new_polygon", [])
+		polygon = _sanitize_polygon(polygon)
 		if polygon.empty():
-			if LOGGER: LOGGER.warn("%s: could not resolve polygon for merged marker %d." % [
+			if LOGGER: LOGGER.warn("%s: could not resolve polygon for merged marker %d (degenerate after sanitize)." % [
 				CLASS_NAME, m_id])
 			continue
 		var new_shapes: Array = _fill_pattern(polygon)
@@ -293,6 +299,27 @@ func _build_room_merge(coords: Vector2, state: Dictionary) -> bool:
 	if LOGGER: LOGGER.info("%s: Merge built %d rooms at %s." % [
 		CLASS_NAME, affected.size(), str(coords)])
 	return true
+
+# ============================================================================
+# PRIVATE — POLYGON SANITIZE
+# ============================================================================
+
+## Removes consecutive duplicate vertices (distance < epsilon) and validates
+## the result has at least 3 distinct points.
+## Returns an empty Array when the polygon is degenerate.
+func _sanitize_polygon(polygon: Array, epsilon: float = 0.5) -> Array:
+	if polygon.size() < 3:
+		return []
+	var result: Array = []
+	var n: int = polygon.size()
+	for i in range(n):
+		var p: Vector2 = polygon[i]
+		var prev: Vector2 = polygon[(i - 1 + n) % n]
+		if p.distance_to(prev) > epsilon:
+			result.append(p)
+	if result.size() < 3:
+		return []
+	return result
 
 # ============================================================================
 # PRIVATE — PATTERN FILL
