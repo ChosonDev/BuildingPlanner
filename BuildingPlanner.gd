@@ -24,7 +24,7 @@ var LOGGER = null
 # ICON PATHS
 # ============================================================================
 
-const TOOL_ICON_PATH = "icons/building_planner_icon.png"
+const TOOL_ICON_PATH = "icons/BuildingPlanner_Icon_no_outline_32x32.png"
 
 # ============================================================================
 # EXTERNAL CLASSES
@@ -60,7 +60,7 @@ func start():
 
 		if self.Global.API and self.Global.API.has("Logger"):
 			LOGGER = self.Global.API.Logger.for_class(CLASS_NAME)
-			LOGGER.info("Mod starting - version 1.0.8")
+			LOGGER.info("Mod starting - version 1.1.0")
 		else:
 			print("BuildingPlanner: _Lib registered but Logger not available")
 	else:
