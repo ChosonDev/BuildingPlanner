@@ -29,13 +29,14 @@ var cached_snappy_mod = null   # Lievven.Snappy_Mod reference (or null)
 
 var _pattern_fill = null   # PatternFill
 var _wall_builder = null   # WallBuilder
+var _path_builder = null   # PathBuilder
 var _room_builder = null   # RoomBuilder
 
 # ============================================================================
 # STATE
 # ============================================================================
 
-enum Mode { NONE, PATTERN_FILL, WALL_BUILDER, ROOM_BUILDER }
+enum Mode { NONE, PATTERN_FILL, WALL_BUILDER, PATH_BUILDER, ROOM_BUILDER }
 
 var _active_mode: int = Mode.PATTERN_FILL  # Default to first mode
 var is_enabled: bool = false
@@ -96,6 +97,7 @@ func _init_features():
 	var root = parent_mod.Global.Root
 	var PatternFillClass = ResourceLoader.load(root + "scripts/features/PatternFill.gd",  "GDScript", false)
 	var WallBuilderClass = ResourceLoader.load(root + "scripts/features/WallBuilder.gd",  "GDScript", false)
+	var PathBuilderClass = ResourceLoader.load(root + "scripts/features/PathBuilder.gd",  "GDScript", false)
 	var RoomBuilderClass = ResourceLoader.load(root + "scripts/features/RoomBuilder.gd",  "GDScript", false)
 
 	if PatternFillClass:
@@ -107,6 +109,11 @@ func _init_features():
 		_wall_builder = WallBuilderClass.new(_gl_api, LOGGER, parent_mod)
 	elif LOGGER:
 		LOGGER.warn("%s: Failed to load WallBuilder.gd" % CLASS_NAME)
+
+	if PathBuilderClass:
+		_path_builder = PathBuilderClass.new(_gl_api, LOGGER, parent_mod)
+	elif LOGGER:
+		LOGGER.warn("%s: Failed to load PathBuilder.gd" % CLASS_NAME)
 
 	if RoomBuilderClass:
 		_room_builder = RoomBuilderClass.new(_gl_api, LOGGER, parent_mod)
@@ -230,6 +237,13 @@ func handle_wall_builder_click(world_pos: Vector2) -> void:
 		if LOGGER: LOGGER.error("%s: WallBuilder module not loaded." % CLASS_NAME)
 		return
 	_wall_builder.build_at(world_pos)
+
+## Called by BuildingPlannerOverlay when the user left-clicks in Path Builder mode.
+func handle_path_builder_click(world_pos: Vector2) -> void:
+	if not _path_builder:
+		if LOGGER: LOGGER.error("%s: PathBuilder module not loaded." % CLASS_NAME)
+		return
+	_path_builder.build_at(world_pos)
 
 ## Called by BuildingPlannerOverlay when the user left-clicks in Room Builder mode.
 func handle_room_builder_click(world_pos: Vector2) -> void:

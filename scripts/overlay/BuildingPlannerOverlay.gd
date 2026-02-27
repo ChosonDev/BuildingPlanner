@@ -49,6 +49,9 @@ func _input(event: InputEvent) -> void:
 		tool.Mode.WALL_BUILDER:
 			tool.handle_wall_builder_click(world_pos)
 			get_tree().set_input_as_handled()
+		tool.Mode.PATH_BUILDER:
+			tool.handle_path_builder_click(world_pos)
+			get_tree().set_input_as_handled()
 		tool.Mode.ROOM_BUILDER:
 			# Apply grid snap when enabled — same logic as GuidesLines.
 			# PatternFill and WallBuilder find shapes by position (compute_fill_polygon),

@@ -1,6 +1,6 @@
 # Building Planner
 
-**Version:** 1.1.0  
+**Version:** 1.1.1  
 **Author:** Choson  
 **Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.2.0+)
 
@@ -39,7 +39,29 @@ Configurable settings in the sidebar:
 | Shadow | Toggle wall shadow |
 | Joint | Sharp / Bevel / Round corner type |
 
-> **Note:** Wall placement is currently **not undoable** (pending a reliable Dungeondraft node-deletion API).
+---
+
+### Path Builder
+Click anywhere inside a Shape marker to trace a **closed path** along its outline.
+
+Configurable settings in the sidebar:
+
+| Setting | Details |
+|---------|---------|
+| Path texture | Scrollable grid of all installed path textures (sourced from PathTool) |
+| Color | ColorPicker — modulates the path texture tint |
+| Width | Path width scale (0.1–10.0) |
+| Smoothness | Bezier smoothing intensity (0.0–1.0 slider) |
+| Layer | 0–9 (Dungeondraft path layer) |
+| Sorting | Over / Under (render order) |
+| Fade In | Fade effect at path start |
+| Fade Out | Fade effect at path end |
+| Grow | Taper effect at path start |
+| Shrink | Taper effect at path end |
+| Block Light | Toggle light occlusion |
+
+> **Path placement is fully undoable** via Ctrl+Z / **History API**. Paths are properly registered
+> with Dungeondraft's Editor and can be selected, moved, and deleted via SelectTool.
 
 ---
 

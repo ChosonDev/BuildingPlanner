@@ -87,3 +87,58 @@ class PatternFillRecord:
 	func record_type() -> String:
 		return "BuildingPlanner.PatternFill"
 
+
+# ============================================================================
+# PATH BUILDER RECORD
+# ============================================================================
+
+# Undo/redo record for a single path creation operation.
+# Stores saved path data for redo and live node refs for undo.
+class PathBuilderRecord:
+	var _parent_mod
+	var LOGGER
+	var _path_datas: Array   # Array of Dictionary from Pathway.Save()
+	var _path_nodes: Array   # current live Pathway node references
+
+	func _init(p_mod, logger, paths: Array):
+		_parent_mod = p_mod
+		LOGGER = logger
+		_path_nodes = paths.duplicate()
+		_path_datas = []
+		for p in _path_nodes:
+			if is_instance_valid(p):
+				_path_datas.append(p.Save())
+		if LOGGER:
+			LOGGER.debug("PathBuilderRecord created for %d path(s)." % [_path_datas.size()])
+
+	func undo():
+		for p in _path_nodes:
+			_free_node(p)
+		_path_nodes = []
+		if LOGGER:
+			LOGGER.debug("PathBuilderRecord.undo(): removed %d path(s)." % [_path_datas.size()])
+
+	func redo():
+		if not _parent_mod or not _parent_mod.Global.World or not _parent_mod.Global.World.Level:
+			if LOGGER: LOGGER.error("PathBuilderRecord.redo(): World/Level not available.")
+			return
+		var pathways = _parent_mod.Global.World.Level.Pathways
+		_path_nodes = []
+		for data in _path_datas:
+			var path = pathways.LoadPathway(data)
+			if path and is_instance_valid(path):
+				_path_nodes.append(path)
+		if LOGGER:
+			LOGGER.debug("PathBuilderRecord.redo(): restored %d path(s)." % [_path_nodes.size()])
+
+	# Called by HistoryApi when record is evicted from history stack.
+	# type 0 = UNDO (objects are live — nothing to do)
+	# type 1 = REDO (objects already freed — release saved data)
+	func dropped(type: int) -> void:
+		if type == 1:   # REDO direction
+			_path_datas.clear()
+			_path_nodes.clear()
+
+	func record_type() -> String:
+		return "BuildingPlanner.PathBuilder"
+

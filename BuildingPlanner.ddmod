@@ -1,7 +1,7 @@
 {
   "name": "Building Planner",
   "unique_id": "Choson.BuildingPlanner",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "Choson",
   "description": "Generate map content from GuidesLines markers: fill areas with patterns, place walls along outlines, and mirror-place objects across a Line marker axis.",
   "dd_version": "1.1.1.1",

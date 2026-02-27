@@ -5,15 +5,17 @@ extends Reference
 #
 # Layout
 #   Title
-#   Mode OptionButton  (Pattern Fill / Wall Builder / Room Builder)
+#   Mode OptionButton  (Pattern Fill / Wall Builder / Path Builder / Room Builder)
 #   ── section: Pattern Fill ──────────────────────────────────────
 #     PatternPanel  (pattern grid, color, rotation, layer, outline)
 #   ── section: Wall Builder ──────────────────────────────────────
-#     WallPanel  (wall grid, shadow, bevel)
+#     WallPanel  (wall grid, color, shadow, bevel)
+#   ── section: Path Builder ──────────────────────────────────────
+#     PathPanel  (path grid, color, width, smoothness, layer, sorting, effects)
 #   ── section: Room Builder ──────────────────────────────────────
 #     PatternPanel  (pattern grid, color, rotation, layer, outline)
 #     ──────────────────────────────────────────────────────────
-#     WallPanel  (wall grid, shadow, bevel)
+#     WallPanel  (wall grid, color, shadow, bevel)
 
 const CLASS_NAME = "BuildingPlannerToolUI"
 
@@ -21,7 +23,8 @@ const CLASS_NAME = "BuildingPlannerToolUI"
 const MODE_NONE         = 0
 const MODE_PATTERN_FILL = 1
 const MODE_WALL_BUILDER = 2
-const MODE_ROOM_BUILDER = 3
+const MODE_PATH_BUILDER = 3
+const MODE_ROOM_BUILDER = 4
 
 # ============================================================================
 # PATTERN PANEL
@@ -455,6 +458,295 @@ class WallPanel:
 
 
 # ============================================================================
+# PATH PANEL
+# Reusable panel: path texture grid + width / smoothness / effects.
+# ============================================================================
+
+class PathPanel:
+
+	var LOGGER = null
+
+	# ---- UI nodes ----
+	var _menu_container  = null   # VBoxContainer — placeholder for the scroll
+	var _grid_menu       = null   # ItemList (owned)
+	var _index_to_path   = {}     # { int index -> String resource_path }
+	var _source_menu     = null   # PathTool Controls["Texture"] GridMenu reference  
+	var _path_tool       = null   # PathTool reference
+	var _selected_index: int = 0  # persists across release/rebuild cycles
+
+	var color_picker      = null   # ColorPickerButton
+	var width_spin        = null   # SpinBox
+	var smoothness_slider = null   # HSlider
+	var layer_spin        = null   # SpinBox
+	var sorting_option    = null   # OptionButton
+	
+	# Effects
+	var fade_in_check     = null   # CheckButton
+	var fade_out_check    = null   # CheckButton
+	var grow_check        = null   # CheckButton
+	var shrink_check      = null   # CheckButton
+	var block_light_check = null   # CheckButton
+
+	# ---- callbacks (FuncRef) ----
+	var _cb_color      = null
+	var _cb_width      = null
+	var _cb_smoothness = null
+	var _cb_layer      = null
+	var _cb_sorting    = null
+	var _cb_fade_in    = null
+	var _cb_fade_out   = null
+	var _cb_grow       = null
+	var _cb_shrink     = null
+	var _cb_block_light = null
+
+	func _init(logger):
+		LOGGER = logger
+
+	## Assign all ten callbacks at once.
+	func set_callbacks(cb_col, cb_wid, cb_smooth, cb_lay, cb_sort, 
+			cb_fade_in, cb_fade_out, cb_grow, cb_shrink, cb_block):
+		_cb_color       = cb_col
+		_cb_width       = cb_wid
+		_cb_smoothness  = cb_smooth
+		_cb_layer       = cb_lay
+		_cb_sorting     = cb_sort
+		_cb_fade_in     = cb_fade_in
+		_cb_fade_out    = cb_fade_out
+		_cb_grow        = cb_grow
+		_cb_shrink      = cb_shrink
+		_cb_block_light = cb_block
+
+	## Build and return a VBoxContainer with all controls.
+	## The path grid slot is left empty — populate via try_build_grid_menu().
+	func build() -> VBoxContainer:
+		var sec = VBoxContainer.new()
+		sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+		sec.add_child(_label("Path:"))
+		_menu_container = VBoxContainer.new()
+		_menu_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sec.add_child(_menu_container)
+
+		sec.add_child(_spacer(6))
+
+		sec.add_child(_label("Color:"))
+		color_picker = ColorPickerButton.new()
+		color_picker.color = Color.white
+		color_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		color_picker.connect("color_changed", self, "_on_color_changed")
+		sec.add_child(color_picker)
+
+		sec.add_child(_label("Width:"))
+		width_spin = SpinBox.new()
+		width_spin.min_value = 0.1
+		width_spin.max_value = 10.0
+		width_spin.step = 0.1
+		width_spin.value = 1.0
+		width_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		width_spin.connect("value_changed", self, "_on_width_changed")
+		sec.add_child(width_spin)
+
+		sec.add_child(_label("Smoothness:"))
+		smoothness_slider = HSlider.new()
+		smoothness_slider.min_value = 0.0
+		smoothness_slider.max_value = 1.0
+		smoothness_slider.step = 0.01
+		smoothness_slider.value = 0.0
+		smoothness_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		smoothness_slider.connect("value_changed", self, "_on_smoothness_changed")
+		sec.add_child(smoothness_slider)
+
+		sec.add_child(_label("Layer:"))
+		layer_spin = SpinBox.new()
+		layer_spin.min_value = 0
+		layer_spin.max_value = 9
+		layer_spin.step = 1
+		layer_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		layer_spin.connect("value_changed", self, "_on_layer_changed")
+		sec.add_child(layer_spin)
+
+		sec.add_child(_label("Sorting:"))
+		sorting_option = OptionButton.new()
+		sorting_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sorting_option.add_item("Over", 0)
+		sorting_option.add_item("Under", 1)
+		sorting_option.connect("item_selected", self, "_on_sorting_selected")
+		sec.add_child(sorting_option)
+
+		sec.add_child(_spacer(4))
+
+		fade_in_check = CheckButton.new()
+		fade_in_check.text = "Fade In"
+		fade_in_check.connect("toggled", self, "_on_fade_in_toggled")
+		sec.add_child(fade_in_check)
+
+		fade_out_check = CheckButton.new()
+		fade_out_check.text = "Fade Out"
+		fade_out_check.connect("toggled", self, "_on_fade_out_toggled")
+		sec.add_child(fade_out_check)
+
+		grow_check = CheckButton.new()
+		grow_check.text = "Grow (Taper Start)"
+		grow_check.connect("toggled", self, "_on_grow_toggled")
+		sec.add_child(grow_check)
+
+		shrink_check = CheckButton.new()
+		shrink_check.text = "Shrink (Taper End)"
+		shrink_check.connect("toggled", self, "_on_shrink_toggled")
+		sec.add_child(shrink_check)
+
+		block_light_check = CheckButton.new()
+		block_light_check.text = "Block Light"
+		block_light_check.connect("toggled", self, "_on_block_light_toggled")
+		sec.add_child(block_light_check)
+
+		return sec
+
+	## Lazily populate the path ItemList from PathTool.Controls["Texture"].
+	## Safe to call multiple times — exits early if already built.
+	func try_build_grid_menu(gl) -> void:
+		if _grid_menu != null or _menu_container == null:
+			return
+
+		if not gl.Editor or not gl.Editor.Tools.has("PathTool"):
+			if LOGGER: LOGGER.warn("PathPanel: PathTool not in Tools[].")
+			return
+
+		# PathTool exposes its GridMenu via Controls["Texture"] (same as WallTool).
+		var pt = gl.Editor.Tools["PathTool"]
+		var controls = pt.get("Controls")
+		if not controls or not controls.has("Texture"):
+			if LOGGER: LOGGER.warn("PathPanel: PathTool.Controls[Texture] not found.")
+			return
+
+		_path_tool = pt
+		var source_menu = controls["Texture"]
+		if not source_menu:
+			if LOGGER: LOGGER.warn("PathPanel: PathTool Controls[Texture] is null.")
+			return
+
+		var count = source_menu.get_item_count()
+		if count == 0:
+			if LOGGER: LOGGER.warn("PathPanel: PathTool Controls[Texture] has 0 items.")
+			return
+
+		_source_menu = source_menu
+
+		var lookup = source_menu.get("Lookup")   # { resource_path: index }
+		if not lookup or lookup.empty():
+			if LOGGER: LOGGER.warn("PathPanel: PathTool GridMenu.Lookup is empty.")
+			return
+
+		# Invert to { index: resource_path }
+		_index_to_path.clear()
+		for path in lookup.keys():
+			_index_to_path[lookup[path]] = path
+
+		var scroll = ScrollContainer.new()
+		scroll.rect_min_size = Vector2(0, 160)
+		scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+		_grid_menu = ItemList.new()
+		_grid_menu.icon_mode = ItemList.ICON_MODE_TOP
+		_grid_menu.fixed_icon_size = Vector2(48, 48)
+		_grid_menu.fixed_column_width = 56
+		_grid_menu.max_columns = 0
+		_grid_menu.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_grid_menu.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		_grid_menu.connect("item_selected", self, "_on_texture_selected")
+
+		# Build items — paths don't have a GetPathColor() equivalent,
+		# so we use default white modulation for all icons.
+		for i in range(count):
+			var icon = source_menu.get_item_icon(i)
+			var tooltip = _index_to_path.get(i, str(i)).get_file().get_basename()
+			if icon:
+				_grid_menu.add_item("", icon)
+			else:
+				_grid_menu.add_item(tooltip)
+			var item_idx: int = _grid_menu.get_item_count() - 1
+			_grid_menu.set_item_tooltip(item_idx, tooltip)
+
+		scroll.add_child(_grid_menu)
+		_menu_container.add_child(scroll)
+
+		var restore_idx: int = min(_selected_index, count - 1)
+		_grid_menu.select(restore_idx)
+		_on_texture_selected(restore_idx)
+
+		if LOGGER: LOGGER.info("PathPanel: ItemList built with %d items." % count)
+
+	## Tear down the ItemList and free all child nodes from the container.
+	func release() -> void:
+		if not _grid_menu:
+			return
+		# Persist current selection before destroying the node
+		var sel: Array = _grid_menu.get_selected_items()
+		if not sel.empty():
+			_selected_index = sel[0]
+		if _grid_menu.is_connected("item_selected", self, "_on_texture_selected"):
+			_grid_menu.disconnect("item_selected", self, "_on_texture_selected")
+		for child in _menu_container.get_children():
+			_menu_container.remove_child(child)
+			child.queue_free()
+		_grid_menu = null
+		_source_menu = null
+		_path_tool = null
+		_index_to_path.clear()
+
+	# ---- internal callbacks ----
+
+	# Path texture selection drives PathTool directly via OnItemSelected —
+	# same technique used by WallPanel. Color picker stays at user-set value
+	# since PathTool doesn't have GetPathColor() equivalent.
+	func _on_texture_selected(index: int):
+		if _source_menu and _source_menu.has_method("OnItemSelected"):
+			_source_menu.OnItemSelected(index)
+
+	func _on_color_changed(color: Color):
+		if _cb_color: _cb_color.call_func(color)
+
+	func _on_width_changed(value: float):
+		if _cb_width: _cb_width.call_func(value)
+
+	func _on_smoothness_changed(value: float):
+		if _cb_smoothness: _cb_smoothness.call_func(value)
+
+	func _on_layer_changed(value: float):
+		if _cb_layer: _cb_layer.call_func(int(value))
+
+	func _on_sorting_selected(index: int):
+		if _cb_sorting: _cb_sorting.call_func(index)
+
+	func _on_fade_in_toggled(pressed: bool):
+		if _cb_fade_in: _cb_fade_in.call_func(pressed)
+
+	func _on_fade_out_toggled(pressed: bool):
+		if _cb_fade_out: _cb_fade_out.call_func(pressed)
+
+	func _on_grow_toggled(pressed: bool):
+		if _cb_grow: _cb_grow.call_func(pressed)
+
+	func _on_shrink_toggled(pressed: bool):
+		if _cb_shrink: _cb_shrink.call_func(pressed)
+
+	func _on_block_light_toggled(pressed: bool):
+		if _cb_block_light: _cb_block_light.call_func(pressed)
+
+	# ---- node helpers ----
+
+	func _label(text: String) -> Label:
+		var lbl = Label.new()
+		lbl.text = text
+		return lbl
+
+	func _spacer(height: int) -> Control:
+		var s = Control.new()
+		s.rect_min_size = Vector2(0, height)
+		return s
+
+
+# ============================================================================
 # REFERENCES
 # ============================================================================
 
@@ -471,6 +763,10 @@ var _pf_pattern_panel = null   # PatternPanel
 # Wall Builder section
 var _wb_section    = null
 var _wb_wall_panel = null   # WallPanel
+
+# Path Builder section
+var _pb_section    = null
+var _pb_path_panel = null   # PathPanel
 
 # Room Builder section
 var _rb_section            = null
@@ -498,6 +794,7 @@ func build(panel):
 	# ---- Create panel instances ----
 	_pf_pattern_panel = PatternPanel.new(LOGGER)
 	_wb_wall_panel    = WallPanel.new(LOGGER)
+	_pb_path_panel    = PathPanel.new(LOGGER)
 	_rb_pattern_panel = PatternPanel.new(LOGGER)
 	_rb_wall_panel    = WallPanel.new(LOGGER)
 
@@ -515,6 +812,20 @@ func build(panel):
 		funcref(self, "_on_wb_color"),
 		funcref(self, "_on_wb_shadow"),
 		funcref(self, "_on_wb_bevel")
+	)
+
+	# ---- Wire callbacks — Path Builder ----
+	_pb_path_panel.set_callbacks(
+		funcref(self, "_on_pb_color"),
+		funcref(self, "_on_pb_width"),
+		funcref(self, "_on_pb_smoothness"),
+		funcref(self, "_on_pb_layer"),
+		funcref(self, "_on_pb_sorting"),
+		funcref(self, "_on_pb_fade_in"),
+		funcref(self, "_on_pb_fade_out"),
+		funcref(self, "_on_pb_grow"),
+		funcref(self, "_on_pb_shrink"),
+		funcref(self, "_on_pb_block_light")
 	)
 
 	# ---- Wire callbacks — Room Builder ----
@@ -551,6 +862,7 @@ func build(panel):
 	_mode_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_mode_selector.add_item("Pattern Fill",  MODE_PATTERN_FILL)
 	_mode_selector.add_item("Wall Builder",  MODE_WALL_BUILDER)
+	_mode_selector.add_item("Path Builder",  MODE_PATH_BUILDER)
 	_mode_selector.add_item("Room Builder",  MODE_ROOM_BUILDER)
 	_mode_selector.selected = 0
 	_mode_selector.connect("item_selected", self, "_on_mode_selected")
@@ -564,6 +876,9 @@ func build(panel):
 
 	_wb_section = _build_wall_builder_section()
 	root.add_child(_wb_section)
+
+	_pb_section = _build_path_builder_section()
+	root.add_child(_pb_section)
 
 	_rb_section = _build_room_builder_section()
 	root.add_child(_rb_section)
@@ -590,6 +905,9 @@ func _build_pattern_fill_section() -> VBoxContainer:
 
 func _build_wall_builder_section() -> VBoxContainer:
 	return _wb_wall_panel.build()
+
+func _build_path_builder_section() -> VBoxContainer:
+	return _pb_path_panel.build()
 
 func _build_room_builder_section() -> VBoxContainer:
 	var sec = VBoxContainer.new()
@@ -625,6 +943,7 @@ func try_build_all_grid_menus() -> void:
 	var gl = _tool.parent_mod.Global
 	_pf_pattern_panel.try_build_grid_menu(gl)
 	_wb_wall_panel.try_build_grid_menu(gl)
+	_pb_path_panel.try_build_grid_menu(gl)
 	_rb_pattern_panel.try_build_grid_menu(gl)
 	_rb_wall_panel.try_build_grid_menu(gl)
 
@@ -632,6 +951,7 @@ func try_build_all_grid_menus() -> void:
 func release_all_grid_menus() -> void:
 	_pf_pattern_panel.release()
 	_wb_wall_panel.release()
+	_pb_path_panel.release()
 	_rb_pattern_panel.release()
 	_rb_wall_panel.release()
 
@@ -642,6 +962,7 @@ func release_all_grid_menus() -> void:
 func _show_section(mode: int):
 	if _pf_section: _pf_section.visible = (mode == MODE_PATTERN_FILL)
 	if _wb_section: _wb_section.visible = (mode == MODE_WALL_BUILDER)
+	if _pb_section: _pb_section.visible = (mode == MODE_PATH_BUILDER)
 	if _rb_section: _rb_section.visible = (mode == MODE_ROOM_BUILDER)
 
 # ============================================================================
@@ -693,6 +1014,50 @@ func _on_wb_bevel(pressed: bool):
 	if _tool._wall_builder:
 		# 0 = Sharp, 1 = Bevel, 2 = Round
 		_tool._wall_builder.active_joint = 1 if pressed else 0
+
+# ============================================================================
+# CALLBACKS — PATH BUILDER
+# ============================================================================
+
+func _on_pb_color(color: Color):
+	if _tool._path_builder:
+		_tool._path_builder.active_color = color
+
+func _on_pb_width(value: float):
+	if _tool._path_builder:
+		_tool._path_builder.active_width = value
+
+func _on_pb_smoothness(value: float):
+	if _tool._path_builder:
+		_tool._path_builder.active_smoothness = value
+
+func _on_pb_layer(value: int):
+	if _tool._path_builder:
+		_tool._path_builder.active_layer = value
+
+func _on_pb_sorting(index: int):
+	if _tool._path_builder:
+		_tool._path_builder.active_sorting = index
+
+func _on_pb_fade_in(pressed: bool):
+	if _tool._path_builder:
+		_tool._path_builder.active_fade_in = pressed
+
+func _on_pb_fade_out(pressed: bool):
+	if _tool._path_builder:
+		_tool._path_builder.active_fade_out = pressed
+
+func _on_pb_grow(pressed: bool):
+	if _tool._path_builder:
+		_tool._path_builder.active_grow = pressed
+
+func _on_pb_shrink(pressed: bool):
+	if _tool._path_builder:
+		_tool._path_builder.active_shrink = pressed
+
+func _on_pb_block_light(pressed: bool):
+	if _tool._path_builder:
+		_tool._path_builder.active_block_light = pressed
 
 # ============================================================================
 # CALLBACKS — ROOM BUILDER

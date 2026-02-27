@@ -5,6 +5,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.1.1] — 2026-02-27
+
+### Added
+- **Path Builder mode** — Click anywhere inside a Shape marker to trace a **closed path** along its outline.
+  Uses Dungeondraft's PathTool API to create properly registered paths with full SelectTool support
+  (select, move, delete). Configurable settings include:
+  - Path texture (scrollable grid sourced from PathTool)
+  - Color modulation (ColorPickerButton)
+  - Width (0.1–10.0 scale factor)
+  - Smoothness (0.0–1.0 slider)
+  - Layer (0–9)
+  - Sorting (Over / Under)
+  - Effects: Fade In, Fade Out, Grow (taper start), Shrink (taper end), Block Light
+- **PathBuilderRecord** undo/redo support in BuildingPlannerHistory — paths can be undone/redone via Ctrl+Z.
+
+### Technical
+- Paths are registered via Save/Load cycle to ensure proper Editor integration (node_id metadata + deletion registry).
+- Closed paths are created by appending the first polygon point to the end (Line2D standard technique).
+
+---
+
 ## [1.1.0] — 2026-02-26
 
 ### Added
