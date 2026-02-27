@@ -1,6 +1,6 @@
 # Building Planner
 
-**Version:** 1.1.1  
+**Version:** 1.1.2  
 **Author:** Choson  
 **Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.2.0+)
 
@@ -66,11 +66,21 @@ Configurable settings in the sidebar:
 ---
 
 ### Room Builder
-One-click room creation — places a pattern fill **and** a closed wall simultaneously,
+One-click room creation — places a pattern fill **and** a closed outline simultaneously,
 using the current GuidesLines Shape parameters (radius, angle, sides) as the room footprint.
 
-Pattern and wall settings are configured independently in the same sidebar sections
-as the standalone modes.
+Pattern settings and outline settings are configured independently in the sidebar.
+
+#### Outline mode
+
+An **"Outline"** dropdown selects how the room border is drawn:
+
+| Option | Description |
+|--------|-------------|
+| **Wall** (default) | Closed wall using WallPanel settings (texture, color, shadow, joint) |
+| **Path** | Closed path using PathPanel settings (texture, color, width, smoothness, layer, sorting, effects) |
+
+Only the panel that matches the active selection is shown in the sidebar.
 
 #### Sub-modes
 

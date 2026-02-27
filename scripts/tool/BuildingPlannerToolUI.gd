@@ -769,10 +769,14 @@ var _pb_section    = null
 var _pb_path_panel = null   # PathPanel
 
 # Room Builder section
-var _rb_section            = null
-var _rb_sub_mode_selector  = null   # OptionButton
-var _rb_pattern_panel      = null   # PatternPanel
-var _rb_wall_panel         = null   # WallPanel
+var _rb_section               = null
+var _rb_sub_mode_selector     = null   # OptionButton
+var _rb_pattern_panel         = null   # PatternPanel
+var _rb_outline_mode_selector = null   # OptionButton (Wall / Path)
+var _rb_wall_panel            = null   # WallPanel
+var _rb_wall_container        = null   # VBoxContainer — shown when outline mode = Wall
+var _rb_path_panel            = null   # PathPanel
+var _rb_path_container        = null   # VBoxContainer — shown when outline mode = Path
 
 # ============================================================================
 # INIT
@@ -797,6 +801,7 @@ func build(panel):
 	_pb_path_panel    = PathPanel.new(LOGGER)
 	_rb_pattern_panel = PatternPanel.new(LOGGER)
 	_rb_wall_panel    = WallPanel.new(LOGGER)
+	_rb_path_panel    = PathPanel.new(LOGGER)
 
 	# ---- Wire callbacks — Pattern Fill ----
 	_pf_pattern_panel.set_callbacks(
@@ -840,6 +845,18 @@ func build(panel):
 		funcref(self, "_on_rb_wall_color"),
 		funcref(self, "_on_rb_shadow"),
 		funcref(self, "_on_rb_bevel")
+	)
+	_rb_path_panel.set_callbacks(
+		funcref(self, "_on_rb_path_color"),
+		funcref(self, "_on_rb_path_width"),
+		funcref(self, "_on_rb_path_smoothness"),
+		funcref(self, "_on_rb_path_layer"),
+		funcref(self, "_on_rb_path_sorting"),
+		funcref(self, "_on_rb_path_fade_in"),
+		funcref(self, "_on_rb_path_fade_out"),
+		funcref(self, "_on_rb_path_grow"),
+		funcref(self, "_on_rb_path_shrink"),
+		funcref(self, "_on_rb_path_block_light")
 	)
 
 	var root = VBoxContainer.new()
@@ -928,8 +945,37 @@ func _build_room_builder_section() -> VBoxContainer:
 
 	sec.add_child(_separator())
 	sec.add_child(_rb_pattern_panel.build())
+
 	sec.add_child(_separator())
-	sec.add_child(_rb_wall_panel.build())
+
+	# ---- Outline mode selector ----
+	var outline_label = Label.new()
+	outline_label.text = "Outline:"
+	sec.add_child(outline_label)
+
+	_rb_outline_mode_selector = OptionButton.new()
+	_rb_outline_mode_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rb_outline_mode_selector.add_item("Wall", 0)
+	_rb_outline_mode_selector.add_item("Path", 1)
+	_rb_outline_mode_selector.selected = 0
+	_rb_outline_mode_selector.connect("item_selected", self, "_on_rb_outline_mode")
+	sec.add_child(_rb_outline_mode_selector)
+
+	sec.add_child(_spacer(4))
+
+	# ---- Wall sub-panel (visible when Outline = Wall) ----
+	_rb_wall_container = VBoxContainer.new()
+	_rb_wall_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rb_wall_container.add_child(_rb_wall_panel.build())
+	sec.add_child(_rb_wall_container)
+
+	# ---- Path sub-panel (visible when Outline = Path) ----
+	_rb_path_container = VBoxContainer.new()
+	_rb_path_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rb_path_container.add_child(_rb_path_panel.build())
+	_rb_path_container.visible = false
+	sec.add_child(_rb_path_container)
+
 	return sec
 
 # ============================================================================
@@ -946,6 +992,7 @@ func try_build_all_grid_menus() -> void:
 	_pb_path_panel.try_build_grid_menu(gl)
 	_rb_pattern_panel.try_build_grid_menu(gl)
 	_rb_wall_panel.try_build_grid_menu(gl)
+	_rb_path_panel.try_build_grid_menu(gl)
 
 ## Called on Disable() — tears down all grid menus.
 func release_all_grid_menus() -> void:
@@ -954,6 +1001,7 @@ func release_all_grid_menus() -> void:
 	_pb_path_panel.release()
 	_rb_pattern_panel.release()
 	_rb_wall_panel.release()
+	_rb_path_panel.release()
 
 # ============================================================================
 # SECTION VISIBILITY
@@ -1098,8 +1146,59 @@ func _on_rb_bevel(pressed: bool):
 
 func _on_rb_sub_mode(index: int):
 	if _tool._room_builder:
-		var RoomBuilderScript = _tool._room_builder
-		RoomBuilderScript.active_sub_mode = index
+		_tool._room_builder.active_sub_mode = index
+
+func _on_rb_outline_mode(index: int):
+	if _tool._room_builder:
+		_tool._room_builder.active_outline_mode = index
+	if _rb_wall_container:
+		_rb_wall_container.visible = (index == 0)
+	if _rb_path_container:
+		_rb_path_container.visible = (index == 1)
+
+# ============================================================================
+# CALLBACKS — ROOM BUILDER (PATH)
+# ============================================================================
+
+func _on_rb_path_color(color: Color):
+	if _tool._room_builder:
+		_tool._room_builder.active_path_color = color
+
+func _on_rb_path_width(value: float):
+	if _tool._room_builder:
+		_tool._room_builder.active_path_width = value
+
+func _on_rb_path_smoothness(value: float):
+	if _tool._room_builder:
+		_tool._room_builder.active_path_smoothness = value
+
+func _on_rb_path_layer(value: int):
+	if _tool._room_builder:
+		_tool._room_builder.active_path_layer = value
+
+func _on_rb_path_sorting(index: int):
+	if _tool._room_builder:
+		_tool._room_builder.active_path_sorting = index
+
+func _on_rb_path_fade_in(pressed: bool):
+	if _tool._room_builder:
+		_tool._room_builder.active_path_fade_in = pressed
+
+func _on_rb_path_fade_out(pressed: bool):
+	if _tool._room_builder:
+		_tool._room_builder.active_path_fade_out = pressed
+
+func _on_rb_path_grow(pressed: bool):
+	if _tool._room_builder:
+		_tool._room_builder.active_path_grow = pressed
+
+func _on_rb_path_shrink(pressed: bool):
+	if _tool._room_builder:
+		_tool._room_builder.active_path_shrink = pressed
+
+func _on_rb_path_block_light(pressed: bool):
+	if _tool._room_builder:
+		_tool._room_builder.active_path_block_light = pressed
 
 # ============================================================================
 # HELPERS

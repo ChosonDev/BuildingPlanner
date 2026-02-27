@@ -5,6 +5,29 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.1.2] — 2026-02-27
+
+### Changed
+- **Room Builder — Outline mode selector.**
+  The sidebar for Room Builder now has an **"Outline"** `OptionButton` (Wall / Path) that
+  replaces the always-visible WallPanel.
+  - **Wall** (default) — same WallPanel as before (texture grid, color, shadow, joint).
+  - **Path** — a full PathPanel appears: texture grid, color, width, smoothness, layer,
+    sorting, and all path effects (Fade In/Out, Grow, Shrink, Block Light).
+  Only the panel that matches the active selection is visible at any time.
+
+### Technical
+- `RoomBuilder`: new `enum OutlineMode { WALL, PATH }` + `active_outline_mode` field.
+- `RoomBuilder`: `_build_room_single_impl` and `_build_room_merge` dispatch to `_build_wall()`
+  or the new `_build_path()` based on `active_outline_mode`.
+- `RoomBuilder`: `_build_path()` mirrors `PathBuilder.build_at()` but accepts a pre-computed
+  polygon (skips `compute_fill_polygon` call), complete with Save/Load registration.
+- `BuildingPlannerToolUI`: `_rb_path_panel` (PathPanel) created, wired (10 callbacks), and
+  added to grid-menu lifecycle.  `_rb_wall_container` / `_rb_path_container` toggle visibility
+  via `_on_rb_outline_mode(index)`.
+
+---
+
 ## [1.1.1] — 2026-02-27
 
 ### Added

@@ -39,12 +39,35 @@ var active_layer:    int   = 0
 var active_outline:  bool  = false
 
 # ============================================================================
-# WALL SETTINGS
+# OUTLINE MODE
+# ============================================================================
+
+enum OutlineMode { WALL = 0, PATH = 1 }
+
+var active_outline_mode: int = OutlineMode.WALL
+
+# ============================================================================
+# WALL SETTINGS  (used when active_outline_mode == OutlineMode.WALL)
 # ============================================================================
 
 var active_shadow: bool = true
 var active_joint:  int  = 1           # 0 = Sharp, 1 = Bevel, 2 = Round
 var active_wall_color: Color = Color.white
+
+# ============================================================================
+# PATH SETTINGS  (used when active_outline_mode == OutlineMode.PATH)
+# ============================================================================
+
+var active_path_color:       Color = Color.white
+var active_path_width:       float = 1.0
+var active_path_smoothness:  float = 0.0
+var active_path_layer:       int   = 0
+var active_path_sorting:     int   = 0   # 0 = Over, 1 = Under
+var active_path_fade_in:     bool  = false
+var active_path_fade_out:    bool  = false
+var active_path_grow:        bool  = false
+var active_path_shrink:      bool  = false
+var active_path_block_light: bool  = false
 
 # ============================================================================
 # INIT
@@ -189,8 +212,12 @@ func _build_room_single_impl(coords: Vector2, state: Dictionary,
 	# ---- 3. Fill with pattern ----
 	var new_shapes: Array = _fill_pattern(polygon)
 
-	# ---- 4. Build wall ----
-	var new_wall = _build_wall(polygon)
+	# ---- 4. Build outline (wall or path) ----
+	var new_wall = null
+	if active_outline_mode == OutlineMode.WALL:
+		new_wall = _build_wall(polygon)
+	elif active_outline_mode == OutlineMode.PATH:
+		_build_path(polygon)
 
 	# ---- 5. Register objects when keeping the marker (potential future merge target) ----
 	if not delete_marker_after:
@@ -285,7 +312,11 @@ func _build_room_merge(coords: Vector2, state: Dictionary) -> bool:
 		var new_shapes: Array = _fill_pattern(polygon)
 		if not new_shapes.empty():
 			all_new_shapes += new_shapes
-		var new_wall = _build_wall(polygon)
+		var new_wall = null
+		if active_outline_mode == OutlineMode.WALL:
+			new_wall = _build_wall(polygon)
+		elif active_outline_mode == OutlineMode.PATH:
+			_build_path(polygon)
 
 		# Register the freshly created objects for this marker
 		_registry.register(m_id, new_shapes,
@@ -393,6 +424,84 @@ func _build_wall(polygon: Array):
 		return null
 
 	return new_wall
+
+# ============================================================================
+# PRIVATE — PATH BUILD
+# ============================================================================
+
+## Builds a path along [polygon] using the current active_path_* settings.
+## Mirrors the logic of PathBuilder.build_at() but accepts a pre-computed polygon.
+func _build_path(polygon: Array) -> void:
+	var _global = _parent_mod.Global
+	if not _global.World or not _global.World.Level:
+		if LOGGER: LOGGER.error("%s: World/Level not loaded." % CLASS_NAME)
+		return
+
+	# Close polygon (Line2D has no built-in closed property)
+	var pts: Array = polygon.duplicate()
+	if pts.size() > 0:
+		pts.append(pts[0])
+
+	var pathways = _global.World.Level.Pathways
+	if not pathways:
+		if LOGGER: LOGGER.error("%s: Pathways node not found in Level." % CLASS_NAME)
+		return
+
+	var path_texture = null
+	if _global.Editor and _global.Editor.Tools.has("PathTool"):
+		path_texture = _global.Editor.Tools["PathTool"].Texture
+	else:
+		if LOGGER: LOGGER.warn("%s: PathTool not found, using defaults." % CLASS_NAME)
+
+	var new_path = pathways.CreatePath(
+		path_texture,
+		active_path_layer,
+		active_path_sorting,
+		active_path_fade_in,
+		active_path_fade_out,
+		active_path_grow,
+		active_path_shrink
+	)
+	if not new_path:
+		if LOGGER: LOGGER.error("%s: CreatePath returned null." % CLASS_NAME)
+		return
+
+	new_path.position = Vector2.ZERO
+	new_path.SetEditPoints(PoolVector2Array(pts))
+	new_path.Smoothness = active_path_smoothness
+	new_path.Smooth()
+	new_path.SetWidthScale(active_path_width)
+	new_path.modulate = active_path_color
+
+	if active_path_block_light:
+		new_path.SetBlockLight(true)
+
+	# Determine next node_id from existing paths
+	var max_node_id: int = 0
+	for child in pathways.get_children():
+		if child == new_path:
+			continue
+		if child.has_meta("node_id"):
+			var nid = child.get_meta("node_id")
+			if typeof(nid) == TYPE_INT and nid > max_node_id:
+				max_node_id = nid
+	new_path.set_meta("node_id", max_node_id + 1)
+	new_path.set_meta("preview", false)
+
+	# Re-register via Save/Load cycle (same pattern as PathBuilder)
+	var path_data = new_path.Save(false)
+	if not path_data or path_data.empty():
+		if LOGGER: LOGGER.error("%s: Path.Save() returned empty data." % CLASS_NAME)
+		return
+	var path_index: int = new_path.get_index()
+	new_path.queue_free()
+	var loaded_path = pathways.LoadPathway(path_data)
+	if not loaded_path:
+		if LOGGER: LOGGER.error("%s: LoadPathway() returned null." % CLASS_NAME)
+		return
+	pathways.move_child(loaded_path, path_index)
+
+	if LOGGER: LOGGER.info("%s: path outline built with %d points." % [CLASS_NAME, polygon.size()])
 
 # ============================================================================
 # PRIVATE — HISTORY
