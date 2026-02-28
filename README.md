@@ -1,6 +1,6 @@
 # Building Planner
 
-**Version:** 1.1.3  
+**Version:** 1.1.4  
 **Author:** Choson  
 **Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.2.0+)
 
@@ -62,6 +62,24 @@ Configurable settings in the sidebar:
 
 > **Path placement is fully undoable** via Ctrl+Z / **History API**. Paths are properly registered
 > with Dungeondraft's Editor and can be selected, moved, and deleted via SelectTool.
+
+---
+
+### Roof Builder
+Click anywhere inside a Shape or Path marker to place a **roof** along its outline.
+
+Configurable settings in the sidebar:
+
+| Setting | Details |
+|---------|--------|
+| Roof texture | Scrollable grid of all installed roof textures (sourced from RoofTool) |
+| Width | Eave width in Dungeondraft units (5–500, default 50) |
+| Type | Gable / Hip / Dormer |
+| Layer | Over / Under (render-order sorting) |
+| Placement mode | *Ridge along area* — outline is the ridge line; *Expand* — eave at outline, roof grows outward; *Inset* — eave at outline, roof grows inward |
+| Shade | Toggles sunlight shading; exposes Sun Direction (0–360 °) and Contrast (0.0–1.0) sub-controls |
+
+> **Roof placement is fully undoable** via Ctrl+Z / **History API**.
 
 ---
 

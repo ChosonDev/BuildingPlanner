@@ -142,3 +142,55 @@ class PathBuilderRecord:
 	func record_type() -> String:
 		return "BuildingPlanner.PathBuilder"
 
+
+# ============================================================================
+# ROOF BUILDER RECORD
+# ============================================================================
+
+# Undo/redo record for a single roof creation operation.
+class RoofBuilderRecord:
+	var _parent_mod
+	var LOGGER
+	var _roof_data: Dictionary   # from Roof.Save()
+	var _roof_node               # current live Roof node reference
+
+	func _init(p_mod, logger, roof_node):
+		_parent_mod = p_mod
+		LOGGER = logger
+		_roof_node = roof_node
+		_roof_data = roof_node.Save() if is_instance_valid(roof_node) else {}
+		if LOGGER:
+			LOGGER.debug("RoofBuilderRecord created.")
+
+	func undo():
+		_free_node(_roof_node)
+		_roof_node = null
+		if LOGGER:
+			LOGGER.debug("RoofBuilderRecord.undo(): removed roof.")
+
+	func redo():
+		if not _parent_mod or not _parent_mod.Global.World or not _parent_mod.Global.World.Level:
+			if LOGGER: LOGGER.error("RoofBuilderRecord.redo(): World/Level not available.")
+			return
+		var level = _parent_mod.Global.World.Level
+		var roofs_node = level.Roofs
+		if not roofs_node:
+			roofs_node = level.get_node_or_null("Roofs")
+		if not roofs_node:
+			if LOGGER: LOGGER.error("RoofBuilderRecord.redo(): Roofs node not found.")
+			return
+		_roof_node = roofs_node.LoadRoof(_roof_data)
+		if LOGGER:
+			LOGGER.debug("RoofBuilderRecord.redo(): restored roof.")
+
+	# Called by HistoryApi when record is evicted from history stack.
+	# type 0 = UNDO (object is live — nothing to do)
+	# type 1 = REDO (object already freed — release saved data)
+	func dropped(type: int) -> void:
+		if type == 1:   # REDO direction
+			_roof_data = {}
+			_roof_node = null
+
+	func record_type() -> String:
+		return "BuildingPlanner.RoofBuilder"
+

@@ -5,7 +5,7 @@ extends Reference
 #
 # Layout
 #   Title
-#   Mode OptionButton  (Pattern Fill / Wall Builder / Path Builder / Room Builder)
+#   Mode OptionButton  (Pattern Fill / Wall Builder / Path Builder / Room Builder / Roof Builder)
 #   ── section: Pattern Fill ──────────────────────────────────────
 #     PatternPanel  (pattern grid, color, rotation, layer, outline)
 #   ── section: Wall Builder ──────────────────────────────────────
@@ -16,6 +16,8 @@ extends Reference
 #     PatternPanel  (pattern grid, color, rotation, layer, outline)
 #     ──────────────────────────────────────────────────────────
 #     WallPanel  (wall grid, color, shadow, bevel)
+#   ── section: Roof Builder ──────────────────────────────────────
+#     RoofPanel  (roof style grid, width, type, sorting, shade)
 
 const CLASS_NAME = "BuildingPlannerToolUI"
 
@@ -25,6 +27,7 @@ const MODE_PATTERN_FILL = 1
 const MODE_WALL_BUILDER = 2
 const MODE_PATH_BUILDER = 3
 const MODE_ROOM_BUILDER = 4
+const MODE_ROOF_BUILDER = 5
 
 # ============================================================================
 # PATTERN PANEL
@@ -765,6 +768,314 @@ class PathPanel:
 
 
 # ============================================================================
+# ROOF PANEL
+# Panel: roof texture grid (from RoofTool) + width / type / sorting / shade.
+# ============================================================================
+
+class RoofPanel:
+
+	var LOGGER = null
+
+	# ---- UI nodes ----
+	var _menu_container  = null   # VBoxContainer — placeholder for the scroll/label
+	var _grid_menu       = null   # ItemList (owned; null when RoofTool has no Controls)
+	var _index_to_path   = {}     # { int index -> String resource_path }
+	var _source_menu     = null   # RoofTool Controls["Texture"] GridMenu reference
+	var _roof_tool       = null   # RoofTool reference
+	var _selected_index: int = 0  # persists across release/rebuild cycles
+	var _no_grid_label   = null   # shown when texture grid is unavailable
+
+	var width_spin          = null   # SpinBox
+	var type_option         = null   # OptionButton  (Gable/Hip/Dormer)
+	var sorting_option      = null   # OptionButton  (Over/Under)
+	var placement_mode_option = null # OptionButton  (Ridge/Expand/Inset)
+	var shade_check         = null   # CheckButton
+	var _shade_sub     = null   # VBoxContainer — visible only when shade = true
+	var sun_dir_slider = null   # HSlider
+	var contrast_slider = null  # HSlider
+
+	var _cb_texture        = null   # func(texture: Texture)
+	var _cb_width          = null   # func(value: float)
+	var _cb_type           = null   # func(index: int)  0=Gable 1=Hip 2=Dormer
+	var _cb_sorting        = null   # func(index: int)  0=Over  1=Under
+	var _cb_placement_mode = null   # func(index: int)  0=Ridge 1=Expand 2=Inset
+	var _cb_shade          = null   # func(pressed: bool)
+	var _cb_sun_dir        = null   # func(value: float)
+	var _cb_contrast       = null   # func(value: float)
+
+	func _init(logger):
+		LOGGER = logger
+
+	## Assign all eight callbacks at once.
+	func set_callbacks(cb_tex, cb_wid, cb_typ, cb_sort, cb_place, cb_shade, cb_sun, cb_con):
+		_cb_texture        = cb_tex
+		_cb_width          = cb_wid
+		_cb_type           = cb_typ
+		_cb_sorting        = cb_sort
+		_cb_placement_mode = cb_place
+		_cb_shade          = cb_shade
+		_cb_sun_dir        = cb_sun
+		_cb_contrast       = cb_con
+
+	## Build and return a VBoxContainer with all controls.
+	## The texture slot shows a fallback label until try_build_grid_menu() succeeds.
+	func build() -> VBoxContainer:
+		var sec = VBoxContainer.new()
+		sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+		# ---- Texture ----
+		sec.add_child(_label("Roof Style:"))
+		_menu_container = VBoxContainer.new()
+		_menu_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sec.add_child(_menu_container)
+
+		_no_grid_label = Label.new()
+		_no_grid_label.text = "(Select style in RoofTool panel)"
+		_no_grid_label.modulate = Color(0.7, 0.7, 0.7, 1.0)
+		_no_grid_label.autowrap = true
+		_menu_container.add_child(_no_grid_label)
+
+		sec.add_child(_spacer(6))
+
+		# ---- Width ----
+		sec.add_child(_label("Width (px):"))
+		width_spin = SpinBox.new()
+		width_spin.min_value = 5.0
+		width_spin.max_value = 500.0
+		width_spin.step = 1.0
+		width_spin.value = 50.0
+		width_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		width_spin.connect("value_changed", self, "_on_width_changed")
+		sec.add_child(width_spin)
+
+		# ---- Type ----
+		sec.add_child(_label("Type:"))
+		type_option = OptionButton.new()
+		type_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		type_option.add_item("Gable",  0)
+		type_option.add_item("Hip",    1)
+		type_option.add_item("Dormer", 2)
+		type_option.connect("item_selected", self, "_on_type_selected")
+		sec.add_child(type_option)
+
+		# ---- Sorting ----
+		sec.add_child(_label("Layer:"))
+		sorting_option = OptionButton.new()
+		sorting_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sorting_option.add_item("Over",  0)
+		sorting_option.add_item("Under", 1)
+		sorting_option.connect("item_selected", self, "_on_sorting_selected")
+		sec.add_child(sorting_option)
+
+		sec.add_child(_spacer(4))
+
+		# ---- Placement mode ----
+		sec.add_child(_label("Placement Mode:"))
+		placement_mode_option = OptionButton.new()
+		placement_mode_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		placement_mode_option.add_item("Ridge along area",  0)
+		placement_mode_option.add_item("Expand (eave at area, roof outside)", 1)
+		placement_mode_option.add_item("Inset  (eave at area, roof inside)",  2)
+		placement_mode_option.hint_tooltip = "Ridge: polygon edge is the ridge line, eave expands outward.\nExpand: polygon is the eave edge, ridge is outside the area.\nInset: polygon is the eave edge, ridge is inside the area."
+		placement_mode_option.connect("item_selected", self, "_on_placement_mode_selected")
+		sec.add_child(placement_mode_option)
+
+		sec.add_child(_spacer(4))
+
+		# ---- Shade ----
+		shade_check = CheckButton.new()
+		shade_check.text = "Sunlight Shading"
+		shade_check.connect("toggled", self, "_on_shade_toggled")
+		sec.add_child(shade_check)
+
+		_shade_sub = VBoxContainer.new()
+		_shade_sub.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_shade_sub.visible = false
+
+		_shade_sub.add_child(_label("Sun Direction (deg):"))
+		sun_dir_slider = HSlider.new()
+		sun_dir_slider.min_value = 0.0
+		sun_dir_slider.max_value = 360.0
+		sun_dir_slider.step = 1.0
+		sun_dir_slider.value = 0.0
+		sun_dir_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sun_dir_slider.connect("value_changed", self, "_on_sun_dir_changed")
+		_shade_sub.add_child(sun_dir_slider)
+
+		_shade_sub.add_child(_label("Shade Contrast:"))
+		contrast_slider = HSlider.new()
+		contrast_slider.min_value = 0.0
+		contrast_slider.max_value = 1.0
+		contrast_slider.step = 0.01
+		contrast_slider.value = 0.5
+		contrast_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		contrast_slider.connect("value_changed", self, "_on_contrast_changed")
+		_shade_sub.add_child(contrast_slider)
+
+		sec.add_child(_shade_sub)
+
+		return sec
+
+	## Lazily populate the texture ItemList from RoofTool.Controls["Texture"].
+	## Also syncs width/type/sorting defaults from the current RoofTool state.
+	## Safe to call multiple times — exits early if already built.
+	func try_build_grid_menu(gl) -> void:
+		if _menu_container == null:
+			return
+
+		if not gl.Editor or not gl.Editor.Tools.has("RoofTool"):
+			if LOGGER: LOGGER.warn("RoofPanel: RoofTool not in Tools[].")
+			return
+
+		var rt = gl.Editor.Tools["RoofTool"]
+		_roof_tool = rt
+
+		# Sync defaults from current RoofTool state (always, even without grid)
+		var rt_width = rt.get("Width")
+		if rt_width and rt_width.get("value") != null and width_spin:
+			width_spin.value = rt_width.value
+			if _cb_width: _cb_width.call_func(rt_width.value)
+
+		var rt_sorting = rt.get("Sorting")
+		if rt_sorting != null and sorting_option:
+			sorting_option.selected = rt_sorting
+			if _cb_sorting: _cb_sorting.call_func(rt_sorting)
+
+		var rt_type = rt.get("Type")
+		if rt_type != null and type_option:
+			type_option.selected = rt_type
+			if _cb_type: _cb_type.call_func(rt_type)
+
+		# Guard: don't rebuild grid if already done
+		if _grid_menu != null:
+			return
+
+		# Try to get the texture GridMenu from RoofTool
+		var controls = rt.get("Controls")
+		if not controls or not controls.has("Texture"):
+			if LOGGER: LOGGER.info("RoofPanel: RoofTool.Controls[Texture] not available — using RoofTool selection.")
+			return
+
+		var source_menu = controls["Texture"]
+		if not source_menu:
+			return
+
+		var count = source_menu.get_item_count()
+		if count == 0:
+			return
+
+		_source_menu = source_menu
+
+		var lookup = source_menu.get("Lookup")
+		if not lookup or lookup.empty():
+			return
+
+		_index_to_path.clear()
+		for path in lookup.keys():
+			_index_to_path[lookup[path]] = path
+
+		var scroll = ScrollContainer.new()
+		scroll.rect_min_size = Vector2(0, 160)
+		scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+		_grid_menu = ItemList.new()
+		_grid_menu.icon_mode = ItemList.ICON_MODE_TOP
+		_grid_menu.fixed_icon_size = Vector2(48, 48)
+		_grid_menu.fixed_column_width = 56
+		_grid_menu.max_columns = 0
+		_grid_menu.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_grid_menu.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		_grid_menu.connect("item_selected", self, "_on_texture_selected")
+
+		for i in range(count):
+			var icon = source_menu.get_item_icon(i)
+			var tooltip = _index_to_path.get(i, str(i)).get_file().get_basename()
+			if icon:
+				_grid_menu.add_item("", icon)
+			else:
+				_grid_menu.add_item(tooltip)
+			_grid_menu.set_item_tooltip(_grid_menu.get_item_count() - 1, tooltip)
+
+		scroll.add_child(_grid_menu)
+
+		# Hide fallback label and show the real grid
+		if _no_grid_label:
+			_no_grid_label.visible = false
+		_menu_container.add_child(scroll)
+
+		var restore_idx: int = min(_selected_index, count - 1)
+		_grid_menu.select(restore_idx)
+		_on_texture_selected(restore_idx)
+
+		if LOGGER: LOGGER.info("RoofPanel: ItemList built with %d items." % count)
+
+	## Tear down the ItemList and free all child nodes from the container.
+	func release() -> void:
+		if _grid_menu:
+			var sel: Array = _grid_menu.get_selected_items()
+			if not sel.empty():
+				_selected_index = sel[0]
+			if _grid_menu.is_connected("item_selected", self, "_on_texture_selected"):
+				_grid_menu.disconnect("item_selected", self, "_on_texture_selected")
+			for child in _menu_container.get_children():
+				_menu_container.remove_child(child)
+				child.queue_free()
+			_grid_menu = null
+			_source_menu = null
+			_index_to_path.clear()
+			# Restore fallback label
+			if _no_grid_label and not _no_grid_label.get_parent():
+				_menu_container.add_child(_no_grid_label)
+				_no_grid_label.visible = true
+		_roof_tool = null
+
+	# ---- internal callbacks ----
+
+	func _on_texture_selected(index: int):
+		if _source_menu and _source_menu.has_method("OnItemSelected"):
+			_source_menu.OnItemSelected(index)
+		if _roof_tool:
+			var tex = _roof_tool.get("Texture")
+			if tex and _cb_texture:
+				_cb_texture.call_func(tex)
+
+	func _on_width_changed(value: float):
+		if _cb_width: _cb_width.call_func(value)
+
+	func _on_type_selected(index: int):
+		if _cb_type: _cb_type.call_func(index)
+
+	func _on_sorting_selected(index: int):
+		if _cb_sorting: _cb_sorting.call_func(index)
+
+	func _on_placement_mode_selected(index: int):
+		if _cb_placement_mode: _cb_placement_mode.call_func(index)
+
+	func _on_shade_toggled(pressed: bool):
+		if _shade_sub:
+			_shade_sub.visible = pressed
+		if _cb_shade: _cb_shade.call_func(pressed)
+
+	func _on_sun_dir_changed(value: float):
+		if _cb_sun_dir: _cb_sun_dir.call_func(value)
+
+	func _on_contrast_changed(value: float):
+		if _cb_contrast: _cb_contrast.call_func(value)
+
+	# ---- node helpers ----
+
+	func _label(text: String) -> Label:
+		var lbl = Label.new()
+		lbl.text = text
+		return lbl
+
+	func _spacer(height: int) -> Control:
+		var s = Control.new()
+		s.rect_min_size = Vector2(0, height)
+		return s
+
+
+# ============================================================================
 # REFERENCES
 # ============================================================================
 
@@ -796,6 +1107,10 @@ var _rb_wall_container        = null   # VBoxContainer — shown when outline mo
 var _rb_path_panel            = null   # PathPanel
 var _rb_path_container        = null   # VBoxContainer — shown when outline mode = Path
 
+# Roof Builder section
+var _rf_section    = null
+var _rf_roof_panel = null   # RoofPanel
+
 # ============================================================================
 # INIT
 # ============================================================================
@@ -820,6 +1135,7 @@ func build(panel):
 	_rb_pattern_panel = PatternPanel.new(LOGGER)
 	_rb_wall_panel    = WallPanel.new(LOGGER)
 	_rb_path_panel    = PathPanel.new(LOGGER)
+	_rf_roof_panel    = RoofPanel.new(LOGGER)
 
 	# ---- Wire callbacks — Pattern Fill ----
 	_pf_pattern_panel.set_callbacks(
@@ -877,6 +1193,18 @@ func build(panel):
 		funcref(self, "_on_rb_path_block_light")
 	)
 
+	# ---- Wire callbacks — Roof Builder ----
+	_rf_roof_panel.set_callbacks(
+		funcref(self, "_on_rf_texture"),
+		funcref(self, "_on_rf_width"),
+		funcref(self, "_on_rf_type"),
+		funcref(self, "_on_rf_sorting"),
+		funcref(self, "_on_rf_placement_mode"),
+		funcref(self, "_on_rf_shade"),
+		funcref(self, "_on_rf_sun_direction"),
+		funcref(self, "_on_rf_shade_contrast")
+	)
+
 	var root = VBoxContainer.new()
 	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
@@ -899,6 +1227,7 @@ func build(panel):
 	_mode_selector.add_item("Wall Builder",  MODE_WALL_BUILDER)
 	_mode_selector.add_item("Path Builder",  MODE_PATH_BUILDER)
 	_mode_selector.add_item("Room Builder",  MODE_ROOM_BUILDER)
+	_mode_selector.add_item("Roof Builder",  MODE_ROOF_BUILDER)
 	_mode_selector.selected = 0
 	_mode_selector.connect("item_selected", self, "_on_mode_selected")
 	root.add_child(_mode_selector)
@@ -917,6 +1246,9 @@ func build(panel):
 
 	_rb_section = _build_room_builder_section()
 	root.add_child(_rb_section)
+
+	_rf_section = _build_roof_builder_section()
+	root.add_child(_rf_section)
 
 	# Show only the first mode's section
 	_show_section(MODE_PATTERN_FILL)
@@ -996,6 +1328,9 @@ func _build_room_builder_section() -> VBoxContainer:
 
 	return sec
 
+func _build_roof_builder_section() -> VBoxContainer:
+	return _rf_roof_panel.build()
+
 # ============================================================================
 # GRID MENU LIFECYCLE
 # ============================================================================
@@ -1011,6 +1346,7 @@ func try_build_all_grid_menus() -> void:
 	_rb_pattern_panel.try_build_grid_menu(gl)
 	_rb_wall_panel.try_build_grid_menu(gl)
 	_rb_path_panel.try_build_grid_menu(gl)
+	_rf_roof_panel.try_build_grid_menu(gl)
 	# Enable path color pickers only when ColourAndModifyThings is installed
 	_pb_path_panel.update_camt_color_state(gl)
 	_rb_path_panel.update_camt_color_state(gl)
@@ -1023,6 +1359,7 @@ func release_all_grid_menus() -> void:
 	_rb_pattern_panel.release()
 	_rb_wall_panel.release()
 	_rb_path_panel.release()
+	_rf_roof_panel.release()
 
 # ============================================================================
 # SECTION VISIBILITY
@@ -1033,6 +1370,7 @@ func _show_section(mode: int):
 	if _wb_section: _wb_section.visible = (mode == MODE_WALL_BUILDER)
 	if _pb_section: _pb_section.visible = (mode == MODE_PATH_BUILDER)
 	if _rb_section: _rb_section.visible = (mode == MODE_ROOM_BUILDER)
+	if _rf_section: _rf_section.visible = (mode == MODE_ROOF_BUILDER)
 
 # ============================================================================
 # CALLBACKS — MODE
@@ -1220,6 +1558,42 @@ func _on_rb_path_shrink(pressed: bool):
 func _on_rb_path_block_light(pressed: bool):
 	if _tool._room_builder:
 		_tool._room_builder.active_path_block_light = pressed
+
+# ============================================================================
+# CALLBACKS — ROOF BUILDER
+# ============================================================================
+
+func _on_rf_texture(texture):
+	if _tool._roof_builder:
+		_tool._roof_builder.active_texture = texture
+
+func _on_rf_width(value: float):
+	if _tool._roof_builder:
+		_tool._roof_builder.active_width = value
+
+func _on_rf_type(index: int):
+	if _tool._roof_builder:
+		_tool._roof_builder.active_type = index
+
+func _on_rf_sorting(index: int):
+	if _tool._roof_builder:
+		_tool._roof_builder.active_sorting = index
+
+func _on_rf_placement_mode(index: int):
+	if _tool._roof_builder:
+		_tool._roof_builder.active_placement_mode = index
+
+func _on_rf_shade(pressed: bool):
+	if _tool._roof_builder:
+		_tool._roof_builder.active_shade = pressed
+
+func _on_rf_sun_direction(value: float):
+	if _tool._roof_builder:
+		_tool._roof_builder.active_sun_direction = value
+
+func _on_rf_shade_contrast(value: float):
+	if _tool._roof_builder:
+		_tool._roof_builder.active_shade_contrast = value
 
 # ============================================================================
 # HELPERS

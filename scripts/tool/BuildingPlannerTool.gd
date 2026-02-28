@@ -31,12 +31,13 @@ var _pattern_fill = null   # PatternFill
 var _wall_builder = null   # WallBuilder
 var _path_builder = null   # PathBuilder
 var _room_builder = null   # RoomBuilder
+var _roof_builder = null   # RoofBuilder
 
 # ============================================================================
 # STATE
 # ============================================================================
 
-enum Mode { NONE, PATTERN_FILL, WALL_BUILDER, PATH_BUILDER, ROOM_BUILDER }
+enum Mode { NONE, PATTERN_FILL, WALL_BUILDER, PATH_BUILDER, ROOM_BUILDER, ROOF_BUILDER }
 
 var _active_mode: int = Mode.PATTERN_FILL  # Default to first mode
 var is_enabled: bool = false
@@ -99,6 +100,7 @@ func _init_features():
 	var WallBuilderClass = ResourceLoader.load(root + "scripts/features/WallBuilder.gd",  "GDScript", false)
 	var PathBuilderClass = ResourceLoader.load(root + "scripts/features/PathBuilder.gd",  "GDScript", false)
 	var RoomBuilderClass = ResourceLoader.load(root + "scripts/features/RoomBuilder.gd",  "GDScript", false)
+	var RoofBuilderClass = ResourceLoader.load(root + "scripts/features/RoofBuilder.gd",  "GDScript", false)
 
 	if PatternFillClass:
 		_pattern_fill = PatternFillClass.new(_gl_api, LOGGER, parent_mod)
@@ -119,6 +121,11 @@ func _init_features():
 		_room_builder = RoomBuilderClass.new(_gl_api, LOGGER, parent_mod)
 	elif LOGGER:
 		LOGGER.warn("%s: Failed to load RoomBuilder.gd" % CLASS_NAME)
+
+	if RoofBuilderClass:
+		_roof_builder = RoofBuilderClass.new(_gl_api, LOGGER, parent_mod)
+	elif LOGGER:
+		LOGGER.warn("%s: Failed to load RoofBuilder.gd" % CLASS_NAME)
 
 	if LOGGER:
 		LOGGER.info("%s: features initialised." % CLASS_NAME)
@@ -251,6 +258,13 @@ func handle_room_builder_click(world_pos: Vector2) -> void:
 		if LOGGER: LOGGER.error("%s: RoomBuilder module not loaded." % CLASS_NAME)
 		return
 	_room_builder.build_room_at(world_pos, gl_tool_state)
+
+## Called by BuildingPlannerOverlay when the user left-clicks in Roof Builder mode.
+func handle_roof_builder_click(world_pos: Vector2) -> void:
+	if not _roof_builder:
+		if LOGGER: LOGGER.error("%s: RoofBuilder module not loaded." % CLASS_NAME)
+		return
+	_roof_builder.build_at(world_pos)
 
 # ============================================================================
 # SNAP

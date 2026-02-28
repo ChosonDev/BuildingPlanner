@@ -5,6 +5,40 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.1.4] — 2026-02-28
+
+### Added
+- **Roof Builder** — new mode that places a Dungeondraft roof along the outline of a
+  Shape or Path marker.
+  - **Texture** — scrollable grid of all installed roof textures (sourced from RoofTool).
+  - **Width** — eave width in Dungeondraft units (5–500, default 50).
+  - **Type** — Gable / Hip / Dormer roof geometry.
+  - **Layer** — Over / Under render-order sorting.
+  - **Placement mode** — three sub-modes controlling where the roof width is projected:
+    - *Ridge along area* — uses the marker outline as the ridge line.
+    - *Expand* — eave sits at the marker outline, roof extends **outward**.
+    - *Inset* — eave sits at the marker outline, roof extends **inward**.
+  - **Shade** — optional sunlight shading toggle with configurable sun direction (0–360 °)
+    and contrast (0.0–1.0).
+  - Full **undo / redo** support via the History API (`RoofBuilderRecord`).
+
+### Technical
+- `RoofBuilder.gd`: new feature class. `build_at(coords)` resolves the fill polygon via
+  `GuidesLinesApi.compute_fill_polygon`, builds the footprint with `_build_roof_polygon`
+  (applies `Geometry.offset_polygon_2d` for Expand/Inset modes), then calls
+  `Roofs.CreateRoof` → `World.AssignNodeID` → `Roof.Set/SetTileTexture/SetSunlight`.
+  The polygon is passed with a two-point overlap (`[…D, A, B]`) to cover the seam left
+  open by Dungeondraft's native roof renderer.
+- `BuildingPlannerHistory`: new `RoofBuilderRecord` class (undo frees the roof node,
+  redo restores it via `Roofs.LoadRoof`).
+- `BuildingPlannerTool`: `Mode.ROOF_BUILDER` added to the `Mode` enum; `_roof_builder`
+  loaded and dispatched from `handle_roof_builder_click`.
+- `BuildingPlannerToolUI`: new `RoofPanel` inner class; `MODE_ROOF_BUILDER = 5`;
+  full sidebar section with all controls and callbacks wired.
+- `BuildingPlannerOverlay`: `Mode.ROOF_BUILDER` branch added to the input dispatcher.
+
+---
+
 ## [1.1.3] — 2026-02-28
 
 ### Added

@@ -61,3 +61,6 @@ func _input(event: InputEvent) -> void:
 				final_pos = tool.snap_position_to_grid(world_pos)
 			tool.handle_room_builder_click(final_pos)
 			get_tree().set_input_as_handled()
+		tool.Mode.ROOF_BUILDER:
+			tool.handle_roof_builder_click(world_pos)
+			get_tree().set_input_as_handled()
