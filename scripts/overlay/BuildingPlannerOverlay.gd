@@ -28,12 +28,44 @@ func _input(event: InputEvent) -> void:
 	if not (event is InputEventMouseButton):
 		return
 
+	# Skip if any Dungeondraft window/popup is currently open.
+	# _input fires before Control._gui_input, so is_input_handled() is not yet set —
+	# we must check visible windows explicitly.
+	var editor = tool.parent_mod.Global.Editor
+	for window in editor.Windows.values():
+		if window.visible:
+			return
+
+	# Skip if Ctrl is held — reserved for camera zoom.
+	if event.control:
+		return
+
+	# ---- Scroll wheel: Room Builder rotation / scale ----
+	# Handled before bounds checks (same pattern as GuidesLines MarkerOverlay).
+	if tool._active_mode == tool.Mode.ROOM_BUILDER and event.pressed:
+		var direction = 0
+		if event.button_index == BUTTON_WHEEL_UP:
+			direction = 1
+		elif event.button_index == BUTTON_WHEEL_DOWN:
+			direction = -1
+		if direction != 0:
+			tool.handle_room_scroll(direction, event.alt)
+			get_tree().set_input_as_handled()
+			return
+
+	# ---- Left click — apply canvas boundary guards ----
 	if event.button_index != BUTTON_LEFT or not event.pressed:
 		return
 
-	# Ignore clicks outside the map canvas (e.g. over the left tool panel)
+	# Ignore clicks outside the map canvas:
+	#   x < 450              — left tool panel
+	#   y < 100              — top UI bar
+	#   y > height - 100     — bottom UI bar
 	var mouse_vp = get_viewport().get_mouse_position()
+	var viewport_size = get_viewport().size
 	if mouse_vp.x < 450:
+		return
+	if mouse_vp.y < 100 or mouse_vp.y > viewport_size.y - 100:
 		return
 
 	if not tool.cached_worldui or not tool.cached_worldui.IsInsideBounds:

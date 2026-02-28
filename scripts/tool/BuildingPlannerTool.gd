@@ -266,6 +266,17 @@ func handle_roof_builder_click(world_pos: Vector2) -> void:
 		return
 	_roof_builder.build_at(world_pos)
 
+## Called by BuildingPlannerOverlay on scroll wheel while in Room Builder mode.
+## [direction]: +1 = wheel up, -1 = wheel down.
+## [alt_held]:  true when Alt is held — adjusts scale instead of rotation.
+func handle_room_scroll(direction: int, alt_held: bool) -> void:
+	if not _room_builder:
+		return
+	if alt_held:
+		_room_builder.adjust_scale(direction * _room_builder.SCALE_STEP)
+	else:
+		_room_builder.adjust_angle(direction * _room_builder.ANGLE_STEP)
+
 # ============================================================================
 # SNAP
 # ============================================================================

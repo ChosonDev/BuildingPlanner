@@ -5,6 +5,36 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.1.5] — 2026-03-01
+
+### Added
+- **Room Builder — scroll wheel controls.**
+  While Room Builder mode is active, the scroll wheel now adjusts the shape being placed
+  without leaving the tool:
+  - **Scroll up / down** — rotates the placement shape by ±5 ° per tick
+    (`shape_angle_offset`, additive over the GuidesLines base angle).
+  - **Alt + Scroll up / down** — scales the placement shape by ±10 % per tick
+    (`shape_scale_factor`, multiplicative over the GuidesLines base radius; minimum 10 %).
+  Both adjustments are reflected live in the shape preview.
+
+### Fixed
+- **Clicks on Dungeondraft windows / popups now work correctly.**
+  The input overlay previously intercepted `_input` before Godot's GUI layer could
+  consume it, causing clicks on open dialogs (preferences, warnings, custom mod windows)
+  to be silently swallowed. The overlay now checks `Global.Editor.Windows` and skips
+  processing if any registered window is visible.
+- **Ctrl+scroll (camera zoom) no longer triggers Room Builder scroll handlers.**
+  Added an early-exit guard when `event.control` is held, consistent with the
+  GuidesLines MarkerOverlay pattern.
+- **Input handling order restructured** to mirror GuidesLines `MarkerOverlay`:
+  scroll-wheel events are processed before left-click boundary guards, so wheel
+  input is never accidentally filtered out by the canvas-area checks.
+- **Top and bottom screen margins (100 px each) added** to the left-click guard.
+  Clicks in the top UI bar area and the bottom status bar area no longer reach
+  the world canvas handler.
+
+---
+
 ## [1.1.4] — 2026-02-28
 
 ### Added

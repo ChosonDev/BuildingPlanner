@@ -60,7 +60,7 @@ func start():
 
 		if self.Global.API and self.Global.API.has("Logger"):
 			LOGGER = self.Global.API.Logger.for_class(CLASS_NAME)
-			LOGGER.info("Mod starting - version 1.1.4")
+			LOGGER.info("Mod starting - version 1.1.5")
 		else:
 			print("BuildingPlanner: _Lib registered but Logger not available")
 	else:

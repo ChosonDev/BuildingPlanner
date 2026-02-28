@@ -71,6 +71,27 @@ var active_path_shrink:      bool  = false
 var active_path_block_light: bool  = false
 
 # ============================================================================
+# SHAPE OVERRIDES (scroll wheel adjustments while Room Builder mode is active)
+# ============================================================================
+
+## Added to state.active_shape_angle (degrees).
+var shape_angle_offset: float = 0.0
+## Multiplied into state.active_shape_radius.
+var shape_scale_factor: float = 1.0
+
+const ANGLE_STEP: float = 5.0    # degrees per scroll tick
+const SCALE_STEP: float = 0.1    # fraction per scroll tick
+const SCALE_MIN: float  = 0.1    # minimum scale factor
+
+## Rotate the preview / next placement by [delta_deg] degrees.
+func adjust_angle(delta_deg: float) -> void:
+	shape_angle_offset = fmod(shape_angle_offset + delta_deg, 360.0)
+
+## Scale the preview / next placement by [delta] (positive = larger, negative = smaller).
+func adjust_scale(delta: float) -> void:
+	shape_scale_factor = max(SCALE_MIN, shape_scale_factor + delta)
+
+# ============================================================================
 # INIT
 # ============================================================================
 
@@ -115,8 +136,8 @@ func update_preview(world_pos: Vector2, cursor_in_ui: bool, state: Dictionary) -
 
 	_gl_api.set_shape_preview(
 		world_pos,
-		state.get("active_shape_radius", 1.0),
-		state.get("active_shape_angle",  0.0),
+		state.get("active_shape_radius", 1.0) * shape_scale_factor,
+		state.get("active_shape_angle",  0.0) + shape_angle_offset,
 		state.get("active_shape_sides",  6),
 		state.get("active_color",        null)
 	)
@@ -186,8 +207,8 @@ func _build_room_single_impl(coords: Vector2, state: Dictionary,
 	# ---- 1. Place temporary Shape marker ----
 	var marker_id: int = _gl_api.place_shape_marker(
 		coords,
-		state.get("active_shape_radius", 1.0),
-		state.get("active_shape_angle",  0.0),
+		state.get("active_shape_radius", 1.0) * shape_scale_factor,
+		state.get("active_shape_angle",  0.0) + shape_angle_offset,
 		state.get("active_shape_sides",  6),
 		state.get("active_color",        null)
 	)
@@ -265,8 +286,8 @@ func _build_room_merge(coords: Vector2, state: Dictionary) -> bool:
 	# ---- 1. Attempt merge ----
 	var merge_result: Dictionary = _gl_api.place_shape_merge(
 		coords,
-		state.get("active_shape_radius", 1.0),
-		state.get("active_shape_angle",  0.0),
+		state.get("active_shape_radius", 1.0) * shape_scale_factor,
+		state.get("active_shape_angle",  0.0) + shape_angle_offset,
 		state.get("active_shape_sides",  6)
 	)
 
