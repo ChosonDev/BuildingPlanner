@@ -78,6 +78,33 @@ static func get_shape_polygon(marker_dict: Dictionary, cell_size: Vector2) -> Ar
 	return points
 
 ## Returns the points for a Path marker dict.
+
+# ============================================================================
+# COLOUR AND MODIFY THINGS INTEGRATION
+# ============================================================================
+
+## Stores a path color into ColourAndModifyThings' ModMapData so the color
+## survives map save/reload when CAMT is installed.
+## Safe to call when CAMT is not installed — no-op in that case.
+## [global_ref] — parent_mod.Global
+## [node_id]    — integer node_id meta from the Pathway node
+## [color]      — Color chosen in PathPanel / RoomBuilder path settings
+static func store_path_color_for_camt(global_ref, node_id: int, color: Color) -> void:
+	if not global_ref.ModMapData.has("UchideshiNodeData"):
+		return  # CAMT not installed — nothing to do
+	var store: Dictionary = global_ref.ModMapData["UchideshiNodeData"]
+	if not store.has("data"):
+		store["data"] = {}
+	var key: String = "node-id-" + str(node_id)
+	# Merge into any existing CAMT record (preserves shader, edge blur, etc.)
+	var entry: Dictionary = store["data"].get(key, {}).duplicate()
+	entry["type"]   = "paths"
+	entry["colour"] = color.to_html()  # RRGGBBAA — same format CAMT uses
+	if not entry.has("shader_type"):        entry["shader_type"]       = "none"
+	if not entry.has("start_point"):        entry["start_point"]       = 0.0
+	if not entry.has("has_edge_blur"):      entry["has_edge_blur"]     = false
+	if not entry.has("path_flip_vertical"): entry["path_flip_vertical"] = false
+	store["data"][key] = entry
 ## For Path markers, the dict key is "marker_points" (Array[Vector2]).
 ## Returns an empty Array if the key is missing.
 static func get_path_points(marker_dict: Dictionary) -> Array:

@@ -18,6 +18,7 @@ extends Reference
 const CLASS_NAME = "RoomBuilder"
 const BuildingPlannerHistory   = preload("../tool/BuildingPlannerHistory.gd")
 const MarkerObjectRegistry     = preload("MarkerObjectRegistry.gd")
+const BuildingPlannerUtils     = preload("../utils/BuildingPlannerUtils.gd")
 
 # ============================================================================
 # REFERENCES
@@ -500,6 +501,18 @@ func _build_path(polygon: Array) -> void:
 		if LOGGER: LOGGER.error("%s: LoadPathway() returned null." % CLASS_NAME)
 		return
 	pathways.move_child(loaded_path, path_index)
+
+	# Re-apply color: LoadPathway() resets modulate to white, so we must set it
+	# again after loading. Store it in CAMT's ModMapData for map save/reload
+	# persistence when ColourAndModifyThings is installed.
+	if active_path_color != Color.white:
+		loaded_path.modulate = active_path_color
+		if loaded_path.has_meta("node_id"):
+			BuildingPlannerUtils.store_path_color_for_camt(
+				_parent_mod.Global,
+				loaded_path.get_meta("node_id"),
+				active_path_color
+			)
 
 	if LOGGER: LOGGER.info("%s: path outline built with %d points." % [CLASS_NAME, polygon.size()])
 

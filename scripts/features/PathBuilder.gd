@@ -16,6 +16,7 @@ extends Reference
 
 const CLASS_NAME = "PathBuilder"
 const BuildingPlannerHistory = preload("../tool/BuildingPlannerHistory.gd")
+const BuildingPlannerUtils   = preload("../utils/BuildingPlannerUtils.gd")
 
 # ============================================================================
 # REFERENCES
@@ -173,6 +174,18 @@ func build_at(coords: Vector2) -> bool:
 	
 	# Restore original position in tree
 	pathways.move_child(loaded_path, path_index)
+
+	# Re-apply color: LoadPathway() resets modulate to white, so we must set it
+	# again after loading. Store it in CAMT's ModMapData for map save/reload
+	# persistence when ColourAndModifyThings is installed.
+	if active_color != Color.white:
+		loaded_path.modulate = active_color
+		if loaded_path.has_meta("node_id"):
+			BuildingPlannerUtils.store_path_color_for_camt(
+				_parent_mod.Global,
+				loaded_path.get_meta("node_id"),
+				active_color
+			)
 
 	if LOGGER: LOGGER.info("%s: path built with %d points." % [CLASS_NAME, polygon.size()])
 	return true

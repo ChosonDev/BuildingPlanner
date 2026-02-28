@@ -1,6 +1,6 @@
 # Building Planner
 
-**Version:** 1.1.2  
+**Version:** 1.1.3  
 **Author:** Choson  
 **Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.2.0+)
 
@@ -49,7 +49,7 @@ Configurable settings in the sidebar:
 | Setting | Details |
 |---------|---------|
 | Path texture | Scrollable grid of all installed path textures (sourced from PathTool) |
-| Color | ColorPicker — modulates the path texture tint |
+| Color | ColorPicker — modulates the path texture tint *(requires ColourAndModifyThings; disabled otherwise)* |
 | Width | Path width scale (0.1–10.0) |
 | Smoothness | Bezier smoothing intensity (0.0–1.0 slider) |
 | Layer | 0–9 (Dungeondraft path layer) |
@@ -112,7 +112,8 @@ Falls back to Single (marker kept) when there are no overlapping markers.
 | [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) | any |
 | [GuidesLines](https://github.com/ChosonDev/GuidesLines) | **v2.2.0+** (v2.2.5+ for Merge mode) |
 
-Optional: **Lievven.Snappy_Mod** — detected automatically; no configuration needed.
+Optional: **Lievven.Snappy_Mod** — detected automatically; no configuration needed.  
+Optional: **[ColourAndModifyThings](https://github.com/Uchideshi/ColourAndModifyThings)** — enables path color picker in Path Builder and Room Builder (color persists across map reloads).
 
 ## Installation
 

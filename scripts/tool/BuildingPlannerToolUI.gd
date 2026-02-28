@@ -694,6 +694,24 @@ class PathPanel:
 		_path_tool = null
 		_index_to_path.clear()
 
+	## Enables or disables the color picker based on CAMT presence.
+	## ColourAndModifyThings is detected via the "UchideshiNodeData" key it
+	## creates in ModMapData. Without CAMT the color cannot persist past a
+	## map reload, so the picker is disabled and reset to white.
+	## Call from try_build_all_grid_menus() once Global is available.
+	func update_camt_color_state(gl) -> void:
+		if not color_picker:
+			return
+		var camt_present: bool = gl.ModMapData.has("UchideshiNodeData")
+		color_picker.disabled = not camt_present
+		if camt_present:
+			color_picker.hint_tooltip = ""
+		else:
+			color_picker.color = Color.white
+			color_picker.hint_tooltip = "Requires ColourAndModifyThings mod (color won't persist without it)"
+			if _cb_color:
+				_cb_color.call_func(Color.white)
+
 	# ---- internal callbacks ----
 
 	# Path texture selection drives PathTool directly via OnItemSelected —
@@ -993,6 +1011,9 @@ func try_build_all_grid_menus() -> void:
 	_rb_pattern_panel.try_build_grid_menu(gl)
 	_rb_wall_panel.try_build_grid_menu(gl)
 	_rb_path_panel.try_build_grid_menu(gl)
+	# Enable path color pickers only when ColourAndModifyThings is installed
+	_pb_path_panel.update_camt_color_state(gl)
+	_rb_path_panel.update_camt_color_state(gl)
 
 ## Called on Disable() — tears down all grid menus.
 func release_all_grid_menus() -> void:

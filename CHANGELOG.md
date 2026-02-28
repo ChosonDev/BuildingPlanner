@@ -5,6 +5,38 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.1.3] — 2026-02-28
+
+### Added
+- **Path color picker integration with ColourAndModifyThings.**
+  The **Color** picker in PathPanel (Path Builder and Room Builder → Outline: Path) now
+  actually applies to created paths.
+  - When **ColourAndModifyThings** is installed: color is applied immediately via
+    `modulate` and is also written into `ModMapData["UchideshiNodeData"]`, so it
+    **persists across map save/reload** through CAMT's own rendering pipeline.
+  - When **ColourAndModifyThings** is not installed: the color picker is **disabled**
+    (grayed out with an explanatory tooltip), preventing user confusion about
+    non-persistent changes.
+
+### Fixed
+- `PathBuilder.build_at()` and `RoomBuilder._build_path()` previously lost the
+  selected color after the mandatory `Save()` + `LoadPathway()` re-registration
+  cycle (Dungeondraft resets `modulate` to white on load). Color is now re-applied
+  to the loaded node.
+
+### Technical
+- `BuildingPlannerUtils`: new static helper `store_path_color_for_camt(global_ref, node_id, color)`.
+  Writes a minimal CAMT-compatible data entry into `ModMapData["UchideshiNodeData"]`;
+  merges with any existing CAMT record to preserve shader/edge-blur settings.
+  No-op when CAMT is not installed.
+- `PathBuilder`, `RoomBuilder`: `preload` for `BuildingPlannerUtils` added.
+  Post-`LoadPathway` block re-applies `modulate` and calls `store_path_color_for_camt`.
+- `BuildingPlannerToolUI` — `PathPanel`: new method `update_camt_color_state(gl)` enables
+  or disables `color_picker` based on the presence of `"UchideshiNodeData"` in `ModMapData`.
+  Called for both `_pb_path_panel` and `_rb_path_panel` inside `try_build_all_grid_menus()`.
+
+---
+
 ## [1.1.2] — 2026-02-27
 
 ### Changed
