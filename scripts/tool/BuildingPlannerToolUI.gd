@@ -173,11 +173,11 @@ class PatternPanel:
 				_grid_menu.add_item(tooltip)
 			var item_idx: int = _grid_menu.get_item_count() - 1
 			_grid_menu.set_item_tooltip(item_idx, tooltip)
-			var path: String = _index_to_path.get(i, "")
-			if path != "" and _pst and _pst.has_method("GetDefaultColor"):
-				var tex = ResourceLoader.load(path, "Texture", false)
-				if tex:
-					_grid_menu.set_item_icon_modulate(item_idx, _pst.GetDefaultColor(tex))
+			# Use the already-loaded icon — custom pack textures are not registered
+			# in Godot's ResourceLoader (no .import files), so ResourceLoader.load
+			# would log "No loader found" errors for every custom asset.
+			if icon and _pst and _pst.has_method("GetDefaultColor"):
+				_grid_menu.set_item_icon_modulate(item_idx, _pst.GetDefaultColor(icon))
 
 		scroll.add_child(_grid_menu)
 		_menu_container.add_child(scroll)
@@ -211,8 +211,10 @@ class PatternPanel:
 		var path: String = _index_to_path.get(index, "")
 		if path == "":
 			return
-		# no_cache=false: reuse Dungeondraft's cached texture instance so that the
-		# asset-tag lookup in SelectTool and SetOptions works correctly.
+		# Pattern textures are loaded by Dungeondraft via ResourceLoader and remain
+		# in its cache, so load(path) returns the correct cached Texture object.
+		# This is required so that PatternShapeTool.SetOptions() receives the exact
+		# Texture instance DD uses for rendering (icon from ItemList is not the same).
 		var tex = ResourceLoader.load(path, "Texture", false)
 		if _cb_texture: _cb_texture.call_func(tex)
 		# Sync color picker to the DD default color for this texture.
@@ -385,11 +387,17 @@ class WallPanel:
 				_grid_menu.add_item(tooltip)
 			var item_idx: int = _grid_menu.get_item_count() - 1
 			_grid_menu.set_item_tooltip(item_idx, tooltip)
+			# Wall textures are loaded by Dungeondraft via the Image API (not
+			# ResourceLoader), so they are never in ResourceLoader's cache.
+			# ResourceLoader.exists() guards the load without logging errors;
+			# for textures that ARE cached, GetWallColor() provides correct tinting.
+			# Custom pack wall textures skip tinting gracefully (icon stays at white).
 			var path: String = _index_to_path.get(i, "")
 			if path != "" and _wall_tool and _wall_tool.has_method("GetWallColor"):
-				var tex = ResourceLoader.load(path, "Texture", false)
-				if tex:
-					_grid_menu.set_item_icon_modulate(item_idx, _wall_tool.GetWallColor(tex))
+				if ResourceLoader.exists(path, "Texture"):
+					var tex = ResourceLoader.load(path, "Texture", false)
+					if tex:
+						_grid_menu.set_item_icon_modulate(item_idx, _wall_tool.GetWallColor(tex))
 
 		scroll.add_child(_grid_menu)
 		_menu_container.add_child(scroll)
