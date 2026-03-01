@@ -5,6 +5,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.1.6] — 2026-03-01
+
+### Added
+- **Room Builder — Conforming sub-mode** *(requires GuidesLines v2.2.5+)*  
+  New sub-mode available in the *Sub-mode* dropdown of Room Builder.
+  When a room is placed, the new shape is kept intact while every existing Shape marker
+  that overlaps it is **dented** to accommodate it
+  (`GuidesLinesApi.place_shape_conforming` — Difference applied to existing markers only).
+  Pattern fill and outline are rebuilt for both the new marker and every dented marker.
+  Falls back gracefully to Single-like behaviour when there are no overlapping markers.
+
+---
+
 ## [1.1.5] — 2026-03-01
 
 ### Added

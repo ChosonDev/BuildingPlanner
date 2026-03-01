@@ -1295,8 +1295,9 @@ func _build_room_builder_section() -> VBoxContainer:
 
 	_rb_sub_mode_selector = OptionButton.new()
 	_rb_sub_mode_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_rb_sub_mode_selector.add_item("Single", 0)
-	_rb_sub_mode_selector.add_item("Merge",  1)
+	_rb_sub_mode_selector.add_item("Single",     0)
+	_rb_sub_mode_selector.add_item("Merge",      1)
+	_rb_sub_mode_selector.add_item("Conforming", 2)
 	_rb_sub_mode_selector.selected = 0
 	_rb_sub_mode_selector.connect("item_selected", self, "_on_rb_sub_mode")
 	sec.add_child(_rb_sub_mode_selector)

@@ -1,6 +1,6 @@
 # Building Planner
 
-**Version:** 1.1.4  
+**Version:** 1.1.6  
 **Author:** Choson  
 **Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.2.0+)
 
@@ -113,6 +113,13 @@ rebuilt from scratch to reflect the new merged geometry. Old fills and walls bel
 absorbed markers are removed automatically.  
 Falls back to Single (marker kept) when there are no overlapping markers.
 
+**Conforming** *(requires GuidesLines v2.2.5+)*  
+Places the new shape intact while **denting** every overlapping existing Shape marker to
+accommodate it (`GuidesLinesApi.place_shape_conforming` — Difference applied to existing
+markers only). The new shape's fill and outline are built normally; each dented marker's
+fill and outline are rebuilt from its new clipped polygon.  
+Falls back to Single (marker kept) when there are no overlapping markers.
+
 #### Additional behaviours
 
 - **Live preview** — a translucent shape polygon follows the cursor while the mode is active,
@@ -128,7 +135,7 @@ Falls back to Single (marker kept) when there are no overlapping markers.
 | Dependency | Minimum version |
 |------------|----------------|
 | [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) | any |
-| [GuidesLines](https://github.com/ChosonDev/GuidesLines) | **v2.2.0+** (v2.2.5+ for Merge mode) |
+| [GuidesLines](https://github.com/ChosonDev/GuidesLines) | **v2.2.0+** (v2.2.5+ for Merge and Conforming modes) |
 
 Optional: **Lievven.Snappy_Mod** — detected automatically; no configuration needed.  
 Optional: **[ColourAndModifyThings](https://github.com/Uchideshi/ColourAndModifyThings)** — enables path color picker in Path Builder and Room Builder (color persists across map reloads).

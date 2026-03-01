@@ -105,7 +105,7 @@ func _init(gl_api, logger, parent_mod = null):
 # SUB-MODE
 # ============================================================================
 
-enum SubMode { SINGLE = 0, MERGE = 1 }
+enum SubMode { SINGLE = 0, MERGE = 1, CONFORM = 2 }
 
 var active_sub_mode: int = SubMode.SINGLE
 
@@ -164,6 +164,8 @@ func build_room_at(coords: Vector2, state: Dictionary) -> bool:
 			return _build_room_single(coords, state)
 		SubMode.MERGE:
 			return _build_room_merge(coords, state)
+		SubMode.CONFORM:
+			return _build_room_conform(coords, state)
 	return false
 
 # ============================================================================
@@ -351,6 +353,113 @@ func _build_room_merge(coords: Vector2, state: Dictionary) -> bool:
 
 	if LOGGER: LOGGER.info("%s: Merge built %d rooms at %s." % [
 		CLASS_NAME, affected.size(), str(coords)])
+	return true
+
+## Conforming mode: the new marker is placed intact; every existing Shape marker
+## that overlaps is dented (Difference applied to existing markers only).
+## Falls back gracefully to Single-like behaviour when no markers overlap
+## (new marker is placed normally, affected_markers is empty).
+func _build_room_conform(coords: Vector2, state: Dictionary) -> bool:
+	if not _gl_api:
+		if LOGGER: LOGGER.error("%s: GuidesLinesApi not available." % CLASS_NAME)
+		return false
+
+	if not _parent_mod:
+		if LOGGER: LOGGER.error("%s: parent_mod not set." % CLASS_NAME)
+		return false
+
+	if not _gl_api.has_method("place_shape_conforming"):
+		if LOGGER: LOGGER.error(
+			"%s: place_shape_conforming not found — update GuidesLines." % CLASS_NAME)
+		return false
+
+	if _gl_api.has_method("is_ready") and not _gl_api.is_ready():
+		if LOGGER: LOGGER.warn("%s: GuidesLinesApi not ready yet." % CLASS_NAME)
+		return false
+
+	if not state.get("ready", false) or state.get("active_marker_type", "") != "Shape":
+		if LOGGER: LOGGER.warn("%s: GuidesLines is not in Shape mode." % CLASS_NAME)
+		return false
+
+	# ---- 1. Place the new marker and dent all overlapping existing markers ----
+	var conform_result: Dictionary = _gl_api.place_shape_conforming(
+		coords,
+		state.get("active_shape_radius", 1.0) * shape_scale_factor,
+		state.get("active_shape_angle",  0.0) + shape_angle_offset,
+		state.get("active_shape_sides",  6),
+		state.get("active_color",        null)
+	)
+
+	var new_marker_id: int = conform_result.get("marker_id", -1)
+	if new_marker_id < 0:
+		if LOGGER: LOGGER.error("%s: place_shape_conforming returned failure." % CLASS_NAME)
+		return false
+
+	var all_new_shapes: Array = []
+
+	# ---- 2. Fill + outline for the newly placed (intact) marker ----
+	# Prefer compute_fill_polygon (same path as Single mode); fall back to marker_polygon.
+	var new_polygon: Array = []
+	var fill_result = _gl_api.compute_fill_polygon(coords)
+	if typeof(fill_result) == TYPE_DICTIONARY and not fill_result.get("polygon", []).empty():
+		new_polygon = fill_result["polygon"]
+	else:
+		new_polygon = conform_result.get("marker_polygon", [])
+	new_polygon = _sanitize_polygon(new_polygon)
+
+	var new_marker_shapes: Array = []
+	var new_marker_wall = null
+	if not new_polygon.empty():
+		new_marker_shapes = _fill_pattern(new_polygon)
+		if active_outline_mode == OutlineMode.WALL:
+			new_marker_wall = _build_wall(new_polygon)
+		elif active_outline_mode == OutlineMode.PATH:
+			_build_path(new_polygon)
+		if not new_marker_shapes.empty():
+			all_new_shapes += new_marker_shapes
+	else:
+		if LOGGER: LOGGER.warn("%s: new marker polygon is degenerate — skipping fill." % CLASS_NAME)
+
+	_registry.register(new_marker_id, new_marker_shapes,
+		[new_marker_wall] if new_marker_wall != null else [])
+
+	# ---- 3. Rebuild fill + outline for every dented existing marker ----
+	var affected: Array = conform_result.get("affected_markers", [])
+	for entry in affected:
+		var m_id: int = entry.get("marker_id", -1)
+		if m_id < 0:
+			continue
+
+		# Remove stale fills and walls owned by this marker before replacing them.
+		_registry.cleanup(m_id)
+
+		# Use the dented polygon reported by the API directly — the marker's outline
+		# no longer matches its original shape so compute_fill_polygon would be unreliable.
+		var dented_polygon: Array = _sanitize_polygon(entry.get("new_polygon", []))
+		if dented_polygon.empty():
+			if LOGGER: LOGGER.warn("%s: dented polygon for marker %d is degenerate — skipping." % [
+				CLASS_NAME, m_id])
+			continue
+
+		var dented_shapes: Array = _fill_pattern(dented_polygon)
+		var dented_wall = null
+		if active_outline_mode == OutlineMode.WALL:
+			dented_wall = _build_wall(dented_polygon)
+		elif active_outline_mode == OutlineMode.PATH:
+			_build_path(dented_polygon)
+
+		if not dented_shapes.empty():
+			all_new_shapes += dented_shapes
+		_registry.register(m_id, dented_shapes,
+			[dented_wall] if dented_wall != null else [])
+
+	# ---- 4. Record history ----
+	if not all_new_shapes.empty():
+		_record_history(BuildingPlannerHistory.PatternFillRecord.new(
+			_parent_mod, LOGGER, all_new_shapes))
+
+	if LOGGER: LOGGER.info("%s: Conforming placed marker %d, dented %d existing markers at %s." % [
+		CLASS_NAME, new_marker_id, affected.size(), str(coords)])
 	return true
 
 # ============================================================================
