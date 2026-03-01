@@ -105,7 +105,7 @@ func _init(gl_api, logger, parent_mod = null):
 # SUB-MODE
 # ============================================================================
 
-enum SubMode { SINGLE = 0, MERGE = 1, CONFORM = 2 }
+enum SubMode { SINGLE = 0, MERGE = 1, CONFORM = 2, WRAP = 3, DIFFERENCE = 4 }
 
 var active_sub_mode: int = SubMode.SINGLE
 
@@ -166,6 +166,10 @@ func build_room_at(coords: Vector2, state: Dictionary) -> bool:
 			return _build_room_merge(coords, state)
 		SubMode.CONFORM:
 			return _build_room_conform(coords, state)
+		SubMode.WRAP:
+			return _build_room_wrapping(coords, state)
+		SubMode.DIFFERENCE:
+			return _build_room_difference(coords, state)
 	return false
 
 # ============================================================================
@@ -460,6 +464,165 @@ func _build_room_conform(coords: Vector2, state: Dictionary) -> bool:
 
 	if LOGGER: LOGGER.info("%s: Conforming placed marker %d, dented %d existing markers at %s." % [
 		CLASS_NAME, new_marker_id, affected.size(), str(coords)])
+	return true
+
+## Wrapping mode: the new marker's own outline is dented wherever it overlaps
+## existing Shape markers (Difference applied to the new shape only).
+## Existing markers are left completely untouched.
+## Falls back gracefully to Single behaviour when no markers overlap
+## (new marker is placed intact, affected_markers is empty).
+func _build_room_wrapping(coords: Vector2, state: Dictionary) -> bool:
+	if not _gl_api:
+		if LOGGER: LOGGER.error("%s: GuidesLinesApi not available." % CLASS_NAME)
+		return false
+
+	if not _parent_mod:
+		if LOGGER: LOGGER.error("%s: parent_mod not set." % CLASS_NAME)
+		return false
+
+	if not _gl_api.has_method("place_shape_wrapping"):
+		if LOGGER: LOGGER.error(
+			"%s: place_shape_wrapping not found — update GuidesLines." % CLASS_NAME)
+		return false
+
+	if _gl_api.has_method("is_ready") and not _gl_api.is_ready():
+		if LOGGER: LOGGER.warn("%s: GuidesLinesApi not ready yet." % CLASS_NAME)
+		return false
+
+	if not state.get("ready", false) or state.get("active_marker_type", "") != "Shape":
+		if LOGGER: LOGGER.warn("%s: GuidesLines is not in Shape mode." % CLASS_NAME)
+		return false
+
+	# ---- 1. Place the new marker with its outline dented by existing markers ----
+	var wrap_result: Dictionary = _gl_api.place_shape_wrapping(
+		coords,
+		state.get("active_shape_radius", 1.0) * shape_scale_factor,
+		state.get("active_shape_angle",  0.0) + shape_angle_offset,
+		state.get("active_shape_sides",  6),
+		state.get("active_color",        null)
+	)
+
+	var new_marker_id: int = wrap_result.get("marker_id", -1)
+	if new_marker_id < 0:
+		if LOGGER: LOGGER.error("%s: place_shape_wrapping returned failure." % CLASS_NAME)
+		return false
+
+	# ---- 2. Resolve the final (dented) polygon for the new marker ----
+	# The dented outline is reported directly by the API — compute_fill_polygon
+	# would return the original shape, so we use marker_polygon instead.
+	var new_polygon: Array = _sanitize_polygon(
+		wrap_result.get("marker_polygon", []))
+
+	if new_polygon.empty():
+		if LOGGER: LOGGER.warn(
+			"%s: Wrapping — new marker polygon is degenerate or fully covered — skipping fill." % CLASS_NAME)
+		_gl_api.delete_marker(new_marker_id)
+		return false
+
+	# ---- 3. Fill + outline the new (dented) marker only ----
+	# Existing markers are intentionally left untouched.
+	var new_shapes: Array = _fill_pattern(new_polygon)
+	var new_wall = null
+	if active_outline_mode == OutlineMode.WALL:
+		new_wall = _build_wall(new_polygon)
+	elif active_outline_mode == OutlineMode.PATH:
+		_build_path(new_polygon)
+
+	# ---- 4. Register for potential future cleanup ----
+	_registry.register(new_marker_id, new_shapes,
+		[new_wall] if new_wall != null else [])
+
+	# ---- 5. Record history ----
+	if not new_shapes.empty():
+		_record_history(BuildingPlannerHistory.PatternFillRecord.new(
+			_parent_mod, LOGGER, new_shapes))
+
+	var affected_count: int = wrap_result.get("affected_markers", []).size()
+	if LOGGER: LOGGER.info(
+		"%s: Wrapping placed marker %d (dented by %d existing markers) at %s." % [
+			CLASS_NAME, new_marker_id, affected_count, str(coords)])
+	return true
+
+## Difference mode: punches a virtual shape out of every overlapping existing
+## Shape marker.  No new marker is placed on the map; only the existing markers'
+## outlines are modified.  Their fills and walls are rebuilt to match.
+## Falls back gracefully (no-op) when no markers overlap.
+func _build_room_difference(coords: Vector2, state: Dictionary) -> bool:
+	if not _gl_api:
+		if LOGGER: LOGGER.error("%s: GuidesLinesApi not available." % CLASS_NAME)
+		return false
+
+	if not _parent_mod:
+		if LOGGER: LOGGER.error("%s: parent_mod not set." % CLASS_NAME)
+		return false
+
+	if not _gl_api.has_method("apply_shape_difference"):
+		if LOGGER: LOGGER.error(
+			"%s: apply_shape_difference not found — update GuidesLines." % CLASS_NAME)
+		return false
+
+	if _gl_api.has_method("is_ready") and not _gl_api.is_ready():
+		if LOGGER: LOGGER.warn("%s: GuidesLinesApi not ready yet." % CLASS_NAME)
+		return false
+
+	if not state.get("ready", false) or state.get("active_marker_type", "") != "Shape":
+		if LOGGER: LOGGER.warn("%s: GuidesLines is not in Shape mode." % CLASS_NAME)
+		return false
+
+	# ---- 1. Apply virtual difference — no new marker is placed ----
+	var diff_result: Dictionary = _gl_api.apply_shape_difference(
+		coords,
+		state.get("active_shape_radius", 1.0) * shape_scale_factor,
+		state.get("active_shape_angle",  0.0) + shape_angle_offset,
+		state.get("active_shape_sides",  6)
+	)
+
+	if diff_result.empty():
+		if LOGGER: LOGGER.error("%s: apply_shape_difference returned internal failure." % CLASS_NAME)
+		return false
+
+	var affected: Array = diff_result.get("affected_markers", [])
+	if affected.empty():
+		if LOGGER: LOGGER.info("%s: Difference — no overlapping markers at %s." % [CLASS_NAME, str(coords)])
+		return true   # Graceful no-op: nothing to cut
+
+	# ---- 2. Rebuild fill + outline for every dented existing marker ----
+	var all_new_shapes: Array = []
+	for entry in affected:
+		var m_id: int = entry.get("marker_id", -1)
+		if m_id < 0:
+			continue
+
+		# Remove stale fills and walls owned by this marker before replacing them.
+		_registry.cleanup(m_id)
+
+		# Use the dented polygon reported by the API — the marker outline has
+		# changed, so compute_fill_polygon would return stale geometry.
+		var dented_polygon: Array = _sanitize_polygon(entry.get("new_polygon", []))
+		if dented_polygon.empty():
+			if LOGGER: LOGGER.warn("%s: Difference — dented polygon for marker %d is degenerate (fully consumed) — skipping." % [
+				CLASS_NAME, m_id])
+			continue
+
+		var dented_shapes: Array = _fill_pattern(dented_polygon)
+		var dented_wall = null
+		if active_outline_mode == OutlineMode.WALL:
+			dented_wall = _build_wall(dented_polygon)
+		elif active_outline_mode == OutlineMode.PATH:
+			_build_path(dented_polygon)
+
+		if not dented_shapes.empty():
+			all_new_shapes += dented_shapes
+		_registry.register(m_id, dented_shapes,
+			[dented_wall] if dented_wall != null else [])
+
+	# ---- 3. Record history ----
+	if not all_new_shapes.empty():
+		_record_history(BuildingPlannerHistory.PatternFillRecord.new(
+			_parent_mod, LOGGER, all_new_shapes))
+
+	if LOGGER: LOGGER.info("%s: Difference dented %d existing markers at %s." % [
+		CLASS_NAME, affected.size(), str(coords)])
 	return true
 
 # ============================================================================

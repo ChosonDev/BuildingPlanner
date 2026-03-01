@@ -1,6 +1,6 @@
 # Building Planner
 
-**Version:** 1.1.6  
+**Version:** 1.1.7  
 **Author:** Choson  
 **Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.2.0+)
 
@@ -120,6 +120,19 @@ markers only). The new shape's fill and outline are built normally; each dented 
 fill and outline are rebuilt from its new clipped polygon.  
 Falls back to Single (marker kept) when there are no overlapping markers.
 
+**Wrapping** *(requires GuidesLines v2.2.5+)*  
+Places a new Shape marker whose own outline is **trimmed** wherever it overlaps existing
+Shape markers (`GuidesLinesApi.place_shape_wrapping` — Difference applied to the new shape
+only). Existing markers are left completely unchanged. The trimmed shape's fill and outline
+are built from the clipped polygon. If the new shape is fully consumed by existing markers,
+placement is aborted and no marker is left on the map.
+
+**Difference** *(requires GuidesLines v2.2.5+)*  
+Punches a virtual cutter shape into every overlapping existing Shape marker without placing
+any new marker (`GuidesLinesApi.apply_shape_difference`). The overlapping area is removed
+from each affected marker's outline; their fills and outlines are rebuilt from the resulting
+clipped polygons. Acts as a no-op when no existing markers overlap the click position.
+
 #### Additional behaviours
 
 - **Live preview** — a translucent shape polygon follows the cursor while the mode is active,
@@ -135,7 +148,7 @@ Falls back to Single (marker kept) when there are no overlapping markers.
 | Dependency | Minimum version |
 |------------|----------------|
 | [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) | any |
-| [GuidesLines](https://github.com/ChosonDev/GuidesLines) | **v2.2.0+** (v2.2.5+ for Merge and Conforming modes) |
+| [GuidesLines](https://github.com/ChosonDev/GuidesLines) | **v2.2.0+** (v2.2.5+ for Merge, Conforming, Wrapping, and Difference modes) |
 
 Optional: **Lievven.Snappy_Mod** — detected automatically; no configuration needed.  
 Optional: **[ColourAndModifyThings](https://github.com/Uchideshi/ColourAndModifyThings)** — enables path color picker in Path Builder and Room Builder (color persists across map reloads).

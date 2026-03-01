@@ -5,6 +5,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.1.7] — 2026-03-01
+
+### Added
+- **Room Builder — Wrapping sub-mode** *(requires GuidesLines v2.2.5+)*  
+  New sub-mode available in the *Sub-mode* dropdown of Room Builder.  
+  The new shape is placed on the map but its own outline is **dented** wherever it overlaps
+  existing Shape markers (`GuidesLinesApi.place_shape_wrapping` — Difference applied to the
+  new shape only; existing markers are left completely unchanged).  
+  Pattern fill and outline are built for the trimmed polygon. If the new shape is fully
+  consumed by existing markers, placement is aborted gracefully and no marker is left.
+
+- **Room Builder — Difference sub-mode** *(requires GuidesLines v2.2.5+)*  
+  New sub-mode available in the *Sub-mode* dropdown of Room Builder.  
+  A virtual cutter shape is applied at the click position without placing any new marker
+  (`GuidesLinesApi.apply_shape_difference`). Every existing Shape marker that overlaps
+  the cursor position has the overlapping area **punched out** of it. Pattern fill and
+  outline for each affected marker are rebuilt from the new clipped polygon.  
+  Acts as a no-op when no existing markers are found at the click position.
+
+---
+
 ## [1.1.6] — 2026-03-01
 
 ### Added
