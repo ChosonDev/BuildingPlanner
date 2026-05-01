@@ -60,7 +60,20 @@ func start():
 
 		if self.Global.API and self.Global.API.has("Logger"):
 			LOGGER = self.Global.API.Logger.for_class(CLASS_NAME)
-			LOGGER.info("Mod starting - version 1.1.9")
+			LOGGER.info("Mod starting - version 1.2.0")
+
+			# Register UpdateChecker for version tracking in the Mod Versions menu
+			if self.Global.API.has("UpdateChecker"):
+				LOGGER.debug("UpdateChecker available, registering...")
+				var update_checker = self.Global.API.UpdateChecker
+				var agent = update_checker.builder()\
+					.fetcher(update_checker.github_fetcher("ChosonDev", "BuildingPlanner"))\
+					.downloader(update_checker.github_downloader("ChosonDev", "BuildingPlanner"))\
+					.build()
+				update_checker.register(agent)
+				LOGGER.debug("UpdateChecker registered for automatic updates")
+			else:
+				LOGGER.info("UpdateChecker not available")
 		else:
 			print("BuildingPlanner: _Lib registered but Logger not available")
 	else:

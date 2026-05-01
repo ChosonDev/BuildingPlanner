@@ -5,6 +5,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.2.0] — 2026-05-01
+
+### Added
+- **Mod Versions menu tracking** — BuildingPlanner now registers with `UpdateChecker`
+  (`CreepyCre._Lib`). The mod appears in the *Mods → Mod Versions* window with its
+  current version and, when online, shows the latest release from GitHub alongside a
+  download button if an update is available.
+
+---
+
 ## [1.1.9] — 2026-05-01
 
 ### Changed
