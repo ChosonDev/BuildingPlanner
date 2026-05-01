@@ -30,6 +30,219 @@ const MODE_ROOM_BUILDER = 4
 const MODE_ROOF_BUILDER = 5
 
 # ============================================================================
+# SEARCHABLE GRID
+# Reusable component: ItemList with a search field and a clear button.
+#
+# Usage:
+#   var sg = SearchableGrid.new()
+#   var node = sg.build()        # returns VBoxContainer to insert into UI
+#   sg.on_item_selected = funcref(self, "_on_item_selected")
+#
+#   # After the source GridMenu is ready:
+#   var items = []
+#   for i in range(source.get_item_count()):
+#       items.append({ "icon": source.get_item_icon(i),
+#                      "tooltip": source.get_item_tooltip(i),
+#                      "modulate": source.get_item_icon_modulate(i) })
+#   sg.populate(items)
+#
+#   # In the selection callback:
+#   func _on_item_selected(original_index: int): ...
+#
+#   # On teardown:
+#   sg.clear()
+# ============================================================================
+
+class SearchableGrid:
+
+	var LOGGER = null
+
+	# ---- UI nodes ----
+	var _container      = null   # VBoxContainer returned by build()
+	var _search_edit    = null   # LineEdit
+	var _grid_menu      = null   # ItemList
+	var _scroll         = null   # ScrollContainer
+
+	# ---- data ----
+	var _all_items:     Array = []   # Array of { icon, tooltip, modulate }
+	var _filtered_map:  Array = []   # filtered_idx → original_idx
+	var _selected_original: int = 0  # persists across populate/filter cycles
+
+	# ---- public callback ----
+	# Assign a FuncRef: func(original_index: int)
+	var on_item_selected = null
+
+	func _init(logger = null):
+		LOGGER = logger
+
+	## Build and return a VBoxContainer containing the search bar + ItemList.
+	## Call once; insert the returned node into your panel's layout.
+	func build() -> VBoxContainer:
+		_container = VBoxContainer.new()
+		_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+		# ---- Search bar ----
+		var hbox = HBoxContainer.new()
+		hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+		_search_edit = LineEdit.new()
+		_search_edit.placeholder_text = "Search…"
+		_search_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_search_edit.connect("text_changed",  self, "_on_search_changed")
+		_search_edit.connect("focus_entered", self, "_on_focus_entered")
+		_search_edit.connect("focus_exited",  self, "_on_focus_exited")
+		hbox.add_child(_search_edit)
+
+		var clear_btn = Button.new()
+		clear_btn.text = "✕"
+		clear_btn.hint_tooltip = "Clear search"
+		clear_btn.flat = true
+		clear_btn.connect("pressed", self, "_on_clear_pressed")
+		hbox.add_child(clear_btn)
+
+		_container.add_child(hbox)
+
+		# ---- ItemList inside a ScrollContainer ----
+		_scroll = ScrollContainer.new()
+		_scroll.rect_min_size = Vector2(0, 160)
+		_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+		_grid_menu = ItemList.new()
+		_grid_menu.icon_mode    = ItemList.ICON_MODE_TOP
+		_grid_menu.fixed_icon_size    = Vector2(48, 48)
+		_grid_menu.fixed_column_width = 56
+		_grid_menu.max_columns        = 0
+		_grid_menu.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_grid_menu.size_flags_vertical   = Control.SIZE_EXPAND_FILL
+		_grid_menu.connect("item_selected", self, "_on_grid_item_selected")
+
+		_scroll.add_child(_grid_menu)
+		_container.add_child(_scroll)
+
+		return _container
+
+	## Populate the ItemList from an array of dicts.
+	## Each dict must have: "icon" (Texture|null), "tooltip" (String).
+	## Optional key: "modulate" (Color).
+	## Resets search text and rebuilds the visible list.
+	func populate(items: Array) -> void:
+		_all_items = items
+		if _search_edit:
+			_search_edit.text = ""
+		_selected_original = 0
+		_rebuild_list("")
+
+	## Update the icon modulation of a single item by its original index.
+	## Useful for lazy-tinting after populate().
+	func set_item_modulate(original_index: int, color: Color) -> void:
+		if original_index < 0 or original_index >= _all_items.size():
+			return
+		_all_items[original_index]["modulate"] = color
+		# If the item is currently visible, update it in the ItemList too.
+		for fi in range(_filtered_map.size()):
+			if _filtered_map[fi] == original_index:
+				if _grid_menu:
+					_grid_menu.set_item_icon_modulate(fi, color)
+				break
+
+	## Remove all items and reset state. Call on panel teardown.
+	func clear() -> void:
+		_all_items.clear()
+		_filtered_map.clear()
+		_selected_original = 0
+		if _search_edit:
+			_search_edit.text = ""
+		if _grid_menu:
+			_grid_menu.clear()
+
+	## Restore a previously saved selection (original index).
+	func restore_selection(original_index: int) -> void:
+		_selected_original = original_index
+		for fi in range(_filtered_map.size()):
+			if _filtered_map[fi] == original_index:
+				if _grid_menu:
+					_grid_menu.select(fi)
+				return
+		# Original item not visible in current filter — select first if available.
+		if _grid_menu and _grid_menu.get_item_count() > 0:
+			_grid_menu.select(0)
+
+	# ---- private ----
+
+	## Returns true if [query] (lower-case, space-separated words) matches [text].
+	func _matches(text: String, query: String) -> bool:
+		if query == "":
+			return true
+		var t = text.to_lower().replace("-", " ").replace("_", " ")
+		for word in query.split(" ", false):
+			if word != "" and t.find(word) == -1:
+				return false
+		return true
+
+	## Rebuild _grid_menu and _filtered_map for the given search text.
+	func _rebuild_list(raw_query: String) -> void:
+		if not _grid_menu:
+			return
+		var query = raw_query.strip_edges().to_lower()
+		_grid_menu.clear()
+		_filtered_map.clear()
+
+		for orig_idx in range(_all_items.size()):
+			var item = _all_items[orig_idx]
+			var tooltip: String = item.get("tooltip", "")
+			if not _matches(tooltip, query):
+				continue
+
+			var icon = item.get("icon", null)
+			if icon:
+				_grid_menu.add_item("", icon)
+			else:
+				_grid_menu.add_item(tooltip)
+
+			var fi = _grid_menu.get_item_count() - 1
+			_grid_menu.set_item_tooltip(fi, tooltip)
+			var mod_color = item.get("modulate", Color.white)
+			_grid_menu.set_item_icon_modulate(fi, mod_color)
+
+			_filtered_map.append(orig_idx)
+
+		# Restore selection
+		var restored = false
+		for fi in range(_filtered_map.size()):
+			if _filtered_map[fi] == _selected_original:
+				_grid_menu.select(fi)
+				restored = true
+				break
+		if not restored and _grid_menu.get_item_count() > 0:
+			_grid_menu.select(0)
+			if on_item_selected:
+				on_item_selected.call_func(_filtered_map[0])
+
+	func _on_search_changed(text: String) -> void:
+		_rebuild_list(text)
+
+	func _on_clear_pressed() -> void:
+		if _search_edit:
+			_search_edit.text = ""
+		_rebuild_list("")
+
+	func _on_grid_item_selected(filtered_index: int) -> void:
+		if filtered_index < 0 or filtered_index >= _filtered_map.size():
+			return
+		_selected_original = _filtered_map[filtered_index]
+		if on_item_selected:
+			on_item_selected.call_func(_selected_original)
+
+	func _on_focus_entered() -> void:
+		if Engine.has_singleton("Global"):
+			Engine.get_singleton("Global").Editor.SearchHasFocus = true
+
+	func _on_focus_exited() -> void:
+		if Engine.has_singleton("Global"):
+			Engine.get_singleton("Global").Editor.SearchHasFocus = false
+
+
+# ============================================================================
 # PATTERN PANEL
 # Reusable panel: pattern texture grid + color / rotation / layer / outline.
 # ============================================================================
@@ -39,11 +252,10 @@ class PatternPanel:
 	var LOGGER = null
 
 	# ---- UI nodes ----
-	var _menu_container  = null   # VBoxContainer — placeholder for the scroll
-	var _grid_menu       = null   # ItemList (owned)
-	var _index_to_path   = {}     # { int index -> String resource_path }
-	var _pst             = null   # PatternShapeTool reference — used for GetDefaultColor()
-	var _selected_index: int = 0  # persists across release/rebuild cycles
+	var _sg          = null   # SearchableGrid instance
+	var _index_to_path = {}   # { original_index -> String resource_path }
+	var _populated   = false  # guards against double-populate
+	var _pst         = null   # PatternShapeTool reference — used for GetDefaultColor()
 
 	var color_picker  = null   # ColorPickerButton
 	var rotation_spin = null   # SpinBox
@@ -69,15 +281,17 @@ class PatternPanel:
 		_cb_outline  = cb_out
 
 	## Build and return a VBoxContainer with all controls.
-	## The pattern grid slot is left empty — populate via try_build_grid_menu().
+	## The pattern grid is built immediately via SearchableGrid; items are
+	## populated lazily in try_build_grid_menu().
 	func build() -> VBoxContainer:
 		var sec = VBoxContainer.new()
 		sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 		sec.add_child(_label("Pattern:"))
-		_menu_container = VBoxContainer.new()
-		_menu_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		sec.add_child(_menu_container)
+
+		_sg = SearchableGrid.new(LOGGER)
+		sec.add_child(_sg.build())
+		_sg.on_item_selected = funcref(self, "_on_texture_selected")
 
 		sec.add_child(_spacer(6))
 
@@ -110,11 +324,11 @@ class PatternPanel:
 
 		return sec
 
-	## Lazily populate the pattern ItemList from PatternShapeTool.textureMenu.
+	## Lazily populate the pattern grid from PatternShapeTool.textureMenu.
 	## Safe to call multiple times — exits early if already built.
 	## Pass Global via tool.parent_mod.Global.
 	func try_build_grid_menu(gl) -> void:
-		if _grid_menu != null or _menu_container == null:
+		if _populated or _sg == null:
 			return
 
 		if not gl.Editor or not gl.Editor.Tools.has("PatternShapeTool"):
@@ -141,71 +355,42 @@ class PatternPanel:
 
 		_pst = gl.Editor.Tools["PatternShapeTool"]
 
-		# Invert to { index: resource_path }
+		# Invert to { original_index: resource_path }
 		_index_to_path.clear()
 		for path in lookup.keys():
 			_index_to_path[lookup[path]] = path
 
-		var scroll = ScrollContainer.new()
-		scroll.rect_min_size = Vector2(0, 160)
-		scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-		_grid_menu = ItemList.new()
-		_grid_menu.icon_mode = ItemList.ICON_MODE_TOP
-		_grid_menu.fixed_icon_size = Vector2(48, 48)
-		_grid_menu.fixed_column_width = 56
-		_grid_menu.max_columns = 0
-		_grid_menu.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_grid_menu.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		_grid_menu.connect("item_selected", self, "_on_texture_selected")
-
-		# Build items and tint each icon with the DD default color.
-		# ResourceLoader returns the cached texture so this is effectively free.
+		# Build item array for SearchableGrid.
+		# Use the already-loaded icon — custom pack textures are not registered
+		# in Godot's ResourceLoader (no .import files), so ResourceLoader.load
+		# would log "No loader found" errors for every custom asset.
+		var items = []
 		for i in range(count):
-			var icon = source_menu.get_item_icon(i)
+			var icon    = source_menu.get_item_icon(i)
 			var tooltip = _index_to_path.get(i, str(i)).get_file().get_basename()
-			if icon:
-				_grid_menu.add_item("", icon)
-			else:
-				_grid_menu.add_item(tooltip)
-			var item_idx: int = _grid_menu.get_item_count() - 1
-			_grid_menu.set_item_tooltip(item_idx, tooltip)
-			# Use the already-loaded icon — custom pack textures are not registered
-			# in Godot's ResourceLoader (no .import files), so ResourceLoader.load
-			# would log "No loader found" errors for every custom asset.
+			var mod_color = Color.white
 			if icon and _pst and _pst.has_method("GetDefaultColor"):
-				_grid_menu.set_item_icon_modulate(item_idx, _pst.GetDefaultColor(icon))
+				mod_color = _pst.GetDefaultColor(icon)
+			items.append({ "icon": icon, "tooltip": tooltip, "modulate": mod_color })
 
-		scroll.add_child(_grid_menu)
-		_menu_container.add_child(scroll)
+		_sg.populate(items)
+		_populated = true
 
-		var restore_idx: int = min(_selected_index, count - 1)
-		_grid_menu.select(restore_idx)
-		_on_texture_selected(restore_idx)
+		if LOGGER: LOGGER.info("PatternPanel: populated with %d items." % count)
 
-		if LOGGER: LOGGER.info("PatternPanel: ItemList built with %d items." % count)
-
-	## Tear down the ItemList and free all child nodes from the container.
+	## Tear down the grid items. UI nodes remain; only data is cleared.
 	func release() -> void:
-		if not _grid_menu:
+		if not _populated:
 			return
-		# Persist current selection before destroying the node
-		var sel: Array = _grid_menu.get_selected_items()
-		if not sel.empty():
-			_selected_index = sel[0]
-		if _grid_menu.is_connected("item_selected", self, "_on_texture_selected"):
-			_grid_menu.disconnect("item_selected", self, "_on_texture_selected")
-		for child in _menu_container.get_children():
-			_menu_container.remove_child(child)
-			child.queue_free()
-		_grid_menu = null
+		_sg.clear()
+		_populated = false
 		_pst = null
 		_index_to_path.clear()
 
 	# ---- internal callbacks ----
 
-	func _on_texture_selected(index: int):
-		var path: String = _index_to_path.get(index, "")
+	func _on_texture_selected(original_index: int):
+		var path: String = _index_to_path.get(original_index, "")
 		if path == "":
 			return
 		# Pattern textures are loaded by Dungeondraft via ResourceLoader and remain
@@ -288,12 +473,11 @@ class WallPanel:
 	var LOGGER = null
 
 	# ---- UI nodes ----
-	var _menu_container  = null   # VBoxContainer — placeholder for the scroll
-	var _grid_menu       = null   # ItemList (owned)
-	var _index_to_path   = {}     # { int index -> String resource_path }
-	var _source_menu     = null   # WallTool Controls["Texture"] GridMenu reference
-	var _wall_tool       = null   # WallTool reference — used for GetWallColor()
-	var _selected_index: int = 0  # persists across release/rebuild cycles
+	var _sg          = null   # SearchableGrid instance
+	var _index_to_path = {}   # { original_index -> String resource_path }
+	var _populated   = false  # guards against double-populate
+	var _source_menu = null   # WallTool Controls["Texture"] GridMenu reference
+	var _wall_tool   = null   # WallTool reference — used for GetWallColor()
 
 	var color_picker = null   # ColorPickerButton
 	var shadow_check = null   # CheckButton
@@ -314,15 +498,15 @@ class WallPanel:
 		_cb_bevel  = cb_bev
 
 	## Build and return a VBoxContainer with all controls.
-	## The wall grid slot is left empty — populate via try_build_grid_menu().
 	func build() -> VBoxContainer:
 		var sec = VBoxContainer.new()
 		sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 		sec.add_child(_label("Wall:"))
-		_menu_container = VBoxContainer.new()
-		_menu_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		sec.add_child(_menu_container)
+
+		_sg = SearchableGrid.new(LOGGER)
+		sec.add_child(_sg.build())
+		_sg.on_item_selected = funcref(self, "_on_texture_selected")
 
 		sec.add_child(_spacer(6))
 
@@ -349,10 +533,10 @@ class WallPanel:
 
 		return sec
 
-	## Lazily populate the wall ItemList from WallTool.Controls["Texture"].
+	## Lazily populate the wall grid from WallTool.Controls["Texture"].
 	## Safe to call multiple times — exits early if already built.
 	func try_build_grid_menu(gl) -> void:
-		if _grid_menu != null or _menu_container == null:
+		if _populated or _sg == null:
 			return
 
 		if not gl.Editor or not gl.Editor.Tools.has("WallTool"):
@@ -384,86 +568,54 @@ class WallPanel:
 			if LOGGER: LOGGER.warn("WallPanel: WallTool GridMenu.Lookup is empty.")
 			return
 
-		# Invert to { index: resource_path }
+		# Invert to { original_index: resource_path }
 		_index_to_path.clear()
 		for path in lookup.keys():
 			_index_to_path[lookup[path]] = path
 
-		var scroll = ScrollContainer.new()
-		scroll.rect_min_size = Vector2(0, 160)
-		scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-		_grid_menu = ItemList.new()
-		_grid_menu.icon_mode = ItemList.ICON_MODE_TOP
-		_grid_menu.fixed_icon_size = Vector2(48, 48)
-		_grid_menu.fixed_column_width = 56
-		_grid_menu.max_columns = 0
-		_grid_menu.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_grid_menu.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		_grid_menu.connect("item_selected", self, "_on_texture_selected")
-
-		# Build items and tint each icon with the DD default color.
-		# ResourceLoader returns the cached texture so this is effectively free.
+		# Build item array for SearchableGrid.
+		# Wall textures are loaded by Dungeondraft via the Image API (not
+		# ResourceLoader), so they are never in ResourceLoader's cache.
+		# ResourceLoader.exists() guards the load without logging errors;
+		# for textures that ARE cached, GetWallColor() provides correct tinting.
+		# Custom pack wall textures skip tinting gracefully (icon stays at white).
+		var items = []
 		for i in range(count):
-			var icon = source_menu.get_item_icon(i)
+			var icon    = source_menu.get_item_icon(i)
 			var tooltip = _index_to_path.get(i, str(i)).get_file().get_basename()
-			if icon:
-				_grid_menu.add_item("", icon)
-			else:
-				_grid_menu.add_item(tooltip)
-			var item_idx: int = _grid_menu.get_item_count() - 1
-			_grid_menu.set_item_tooltip(item_idx, tooltip)
-			# Wall textures are loaded by Dungeondraft via the Image API (not
-			# ResourceLoader), so they are never in ResourceLoader's cache.
-			# ResourceLoader.exists() guards the load without logging errors;
-			# for textures that ARE cached, GetWallColor() provides correct tinting.
-			# Custom pack wall textures skip tinting gracefully (icon stays at white).
+			var mod_color = Color.white
 			var path: String = _index_to_path.get(i, "")
 			if path != "" and _wall_tool and _wall_tool.has_method("GetWallColor"):
 				if ResourceLoader.exists(path, "Texture"):
 					var tex = ResourceLoader.load(path, "Texture", false)
 					if tex:
-						_grid_menu.set_item_icon_modulate(item_idx, _wall_tool.GetWallColor(tex))
+						mod_color = _wall_tool.GetWallColor(tex)
+			items.append({ "icon": icon, "tooltip": tooltip, "modulate": mod_color })
 
-		scroll.add_child(_grid_menu)
-		_menu_container.add_child(scroll)
+		_sg.populate(items)
+		_populated = true
 
-		var restore_idx: int = min(_selected_index, count - 1)
-		_grid_menu.select(restore_idx)
-		_on_texture_selected(restore_idx)
+		if LOGGER: LOGGER.info("WallPanel: populated with %d items." % count)
 
-		if LOGGER: LOGGER.info("WallPanel: ItemList built with %d items." % count)
-
-	## Tear down the ItemList and free all child nodes from the container.
+	## Tear down the grid items. UI nodes remain; only data is cleared.
 	func release() -> void:
-		if not _grid_menu:
+		if not _populated:
 			return
-		# Persist current selection before destroying the node
-		var sel: Array = _grid_menu.get_selected_items()
-		if not sel.empty():
-			_selected_index = sel[0]
-		if _grid_menu.is_connected("item_selected", self, "_on_texture_selected"):
-			_grid_menu.disconnect("item_selected", self, "_on_texture_selected")
-		for child in _menu_container.get_children():
-			_menu_container.remove_child(child)
-			child.queue_free()
-		_grid_menu = null
+		_sg.clear()
+		_populated = false
 		_source_menu = null
 		_wall_tool = null
 		_index_to_path.clear()
 
 	# ---- internal callbacks ----
 
-	# Wall texture selection drives WallTool directly via OnItemSelected —
-	# same technique used by AdditionalSearchOptions. This avoids guessing the
-	# resource path format (png vs tres) for ResourceLoader.
-	# After selection, read back the default color for this wall style and
-	# sync it to both the color picker and the active_color setting.
-	func _on_texture_selected(index: int):
+	# Wall texture selection drives WallTool directly via OnItemSelected.
+	# original_index == DD GridMenu index because _index_to_path is built
+	# from DD's Lookup dict where the value is the DD item index.
+	func _on_texture_selected(original_index: int):
 		if _source_menu and _source_menu.has_method("OnItemSelected"):
-			_source_menu.OnItemSelected(index)
+			_source_menu.OnItemSelected(original_index)
 		if _wall_tool and _wall_tool.has_method("GetWallColor"):
-			# Pass current texture so GetWallColor returns the style-specific default.
 			# WallTool.Texture is already updated by OnItemSelected above.
 			var wall_texture = _wall_tool.get("Texture")
 			var default_color: Color = _wall_tool.GetWallColor(wall_texture)
@@ -504,19 +656,18 @@ class PathPanel:
 	var LOGGER = null
 
 	# ---- UI nodes ----
-	var _menu_container  = null   # VBoxContainer — placeholder for the scroll
-	var _grid_menu       = null   # ItemList (owned)
-	var _index_to_path   = {}     # { int index -> String resource_path }
-	var _source_menu     = null   # PathTool Controls["Texture"] GridMenu reference  
-	var _path_tool       = null   # PathTool reference
-	var _selected_index: int = 0  # persists across release/rebuild cycles
+	var _sg          = null   # SearchableGrid instance
+	var _index_to_path = {}   # { original_index -> String resource_path }
+	var _populated   = false  # guards against double-populate
+	var _source_menu = null   # PathTool Controls["Texture"] GridMenu reference
+	var _path_tool   = null   # PathTool reference
 
 	var color_picker      = null   # ColorPickerButton
 	var width_spin        = null   # SpinBox
 	var smoothness_slider = null   # HSlider
 	var layer_option      = null   # OptionButton
 	var sorting_option    = null   # OptionButton
-	
+
 	# Effects
 	var fade_in_check     = null   # CheckButton
 	var fade_out_check    = null   # CheckButton
@@ -540,7 +691,7 @@ class PathPanel:
 		LOGGER = logger
 
 	## Assign all ten callbacks at once.
-	func set_callbacks(cb_col, cb_wid, cb_smooth, cb_lay, cb_sort, 
+	func set_callbacks(cb_col, cb_wid, cb_smooth, cb_lay, cb_sort,
 			cb_fade_in, cb_fade_out, cb_grow, cb_shrink, cb_block):
 		_cb_color       = cb_col
 		_cb_width       = cb_wid
@@ -554,15 +705,15 @@ class PathPanel:
 		_cb_block_light = cb_block
 
 	## Build and return a VBoxContainer with all controls.
-	## The path grid slot is left empty — populate via try_build_grid_menu().
 	func build() -> VBoxContainer:
 		var sec = VBoxContainer.new()
 		sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 		sec.add_child(_label("Path:"))
-		_menu_container = VBoxContainer.new()
-		_menu_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		sec.add_child(_menu_container)
+
+		_sg = SearchableGrid.new(LOGGER)
+		sec.add_child(_sg.build())
+		_sg.on_item_selected = funcref(self, "_on_texture_selected")
 
 		sec.add_child(_spacer(6))
 
@@ -636,10 +787,10 @@ class PathPanel:
 
 		return sec
 
-	## Lazily populate the path ItemList from PathTool.Controls["Texture"].
+	## Lazily populate the path grid from PathTool.Controls["Texture"].
 	## Safe to call multiple times — exits early if already built.
 	func try_build_grid_menu(gl) -> void:
-		if _grid_menu != null or _menu_container == null:
+		if _populated or _sg == null:
 			return
 
 		if not gl.Editor or not gl.Editor.Tools.has("PathTool"):
@@ -671,59 +822,30 @@ class PathPanel:
 			if LOGGER: LOGGER.warn("PathPanel: PathTool GridMenu.Lookup is empty.")
 			return
 
-		# Invert to { index: resource_path }
+		# Invert to { original_index: resource_path }
 		_index_to_path.clear()
 		for path in lookup.keys():
 			_index_to_path[lookup[path]] = path
 
-		var scroll = ScrollContainer.new()
-		scroll.rect_min_size = Vector2(0, 160)
-		scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-		_grid_menu = ItemList.new()
-		_grid_menu.icon_mode = ItemList.ICON_MODE_TOP
-		_grid_menu.fixed_icon_size = Vector2(48, 48)
-		_grid_menu.fixed_column_width = 56
-		_grid_menu.max_columns = 0
-		_grid_menu.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_grid_menu.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		_grid_menu.connect("item_selected", self, "_on_texture_selected")
-
-		# Build items — paths don't have a GetPathColor() equivalent,
-		# so we use default white modulation for all icons.
+		# Build item array for SearchableGrid.
+		# Paths don't have a GetPathColor() equivalent, so modulate stays white.
+		var items = []
 		for i in range(count):
-			var icon = source_menu.get_item_icon(i)
+			var icon    = source_menu.get_item_icon(i)
 			var tooltip = _index_to_path.get(i, str(i)).get_file().get_basename()
-			if icon:
-				_grid_menu.add_item("", icon)
-			else:
-				_grid_menu.add_item(tooltip)
-			var item_idx: int = _grid_menu.get_item_count() - 1
-			_grid_menu.set_item_tooltip(item_idx, tooltip)
+			items.append({ "icon": icon, "tooltip": tooltip, "modulate": Color.white })
 
-		scroll.add_child(_grid_menu)
-		_menu_container.add_child(scroll)
+		_sg.populate(items)
+		_populated = true
 
-		var restore_idx: int = min(_selected_index, count - 1)
-		_grid_menu.select(restore_idx)
-		_on_texture_selected(restore_idx)
+		if LOGGER: LOGGER.info("PathPanel: populated with %d items." % count)
 
-		if LOGGER: LOGGER.info("PathPanel: ItemList built with %d items." % count)
-
-	## Tear down the ItemList and free all child nodes from the container.
+	## Tear down the grid items. UI nodes remain; only data is cleared.
 	func release() -> void:
-		if not _grid_menu:
+		if not _populated:
 			return
-		# Persist current selection before destroying the node
-		var sel: Array = _grid_menu.get_selected_items()
-		if not sel.empty():
-			_selected_index = sel[0]
-		if _grid_menu.is_connected("item_selected", self, "_on_texture_selected"):
-			_grid_menu.disconnect("item_selected", self, "_on_texture_selected")
-		for child in _menu_container.get_children():
-			_menu_container.remove_child(child)
-			child.queue_free()
-		_grid_menu = null
+		_sg.clear()
+		_populated = false
 		_source_menu = null
 		_path_tool = null
 		_index_to_path.clear()
@@ -748,12 +870,11 @@ class PathPanel:
 
 	# ---- internal callbacks ----
 
-	# Path texture selection drives PathTool directly via OnItemSelected —
-	# same technique used by WallPanel. Color picker stays at user-set value
-	# since PathTool doesn't have GetPathColor() equivalent.
-	func _on_texture_selected(index: int):
+	# Path texture selection drives PathTool directly via OnItemSelected.
+	# original_index == DD GridMenu index (same mapping as WallPanel).
+	func _on_texture_selected(original_index: int):
 		if _source_menu and _source_menu.has_method("OnItemSelected"):
-			_source_menu.OnItemSelected(index)
+			_source_menu.OnItemSelected(original_index)
 
 	func _on_color_changed(color: Color):
 		if _cb_color: _cb_color.call_func(color)
@@ -837,22 +958,21 @@ class RoofPanel:
 	var LOGGER = null
 
 	# ---- UI nodes ----
-	var _menu_container  = null   # VBoxContainer — placeholder for the scroll/label
-	var _grid_menu       = null   # ItemList (owned; null when RoofTool has no Controls)
-	var _index_to_path   = {}     # { int index -> String resource_path }
-	var _source_menu     = null   # RoofTool Controls["Texture"] GridMenu reference
-	var _roof_tool       = null   # RoofTool reference
-	var _selected_index: int = 0  # persists across release/rebuild cycles
-	var _no_grid_label   = null   # shown when texture grid is unavailable
+	var _sg          = null   # SearchableGrid instance (null when RoofTool has no Controls)
+	var _no_grid_label = null # shown when texture grid is unavailable
+	var _index_to_path = {}   # { original_index -> String resource_path }
+	var _populated   = false  # guards against double-populate
+	var _source_menu = null   # RoofTool Controls["Texture"] GridMenu reference
+	var _roof_tool   = null   # RoofTool reference
 
-	var width_spin          = null   # SpinBox
-	var type_option         = null   # OptionButton  (Gable/Hip/Dormer)
-	var sorting_option      = null   # OptionButton  (Over/Under)
-	var placement_mode_option = null # OptionButton  (Ridge/Expand/Inset)
-	var shade_check         = null   # CheckButton
-	var _shade_sub     = null   # VBoxContainer — visible only when shade = true
-	var sun_dir_slider = null   # HSlider
-	var contrast_slider = null  # HSlider
+	var width_spin            = null   # SpinBox
+	var type_option           = null   # OptionButton  (Gable/Hip/Dormer)
+	var sorting_option        = null   # OptionButton  (Over/Under)
+	var placement_mode_option = null   # OptionButton  (Ridge/Expand/Inset)
+	var shade_check           = null   # CheckButton
+	var _shade_sub            = null   # VBoxContainer — visible only when shade = true
+	var sun_dir_slider        = null   # HSlider
+	var contrast_slider       = null   # HSlider
 
 	var _cb_texture        = null   # func(texture: Texture)
 	var _cb_width          = null   # func(value: float)
@@ -878,22 +998,27 @@ class RoofPanel:
 		_cb_contrast       = cb_con
 
 	## Build and return a VBoxContainer with all controls.
-	## The texture slot shows a fallback label until try_build_grid_menu() succeeds.
+	## A fallback label is shown until try_build_grid_menu() succeeds.
 	func build() -> VBoxContainer:
 		var sec = VBoxContainer.new()
 		sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 		# ---- Texture ----
 		sec.add_child(_label("Roof Style:"))
-		_menu_container = VBoxContainer.new()
-		_menu_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		sec.add_child(_menu_container)
 
+		# Fallback label shown when RoofTool.Controls["Texture"] is unavailable.
 		_no_grid_label = Label.new()
 		_no_grid_label.text = "(Select style in RoofTool panel)"
 		_no_grid_label.modulate = Color(0.7, 0.7, 0.7, 1.0)
 		_no_grid_label.autowrap = true
-		_menu_container.add_child(_no_grid_label)
+		sec.add_child(_no_grid_label)
+
+		# SearchableGrid placeholder — populated lazily.
+		_sg = SearchableGrid.new(LOGGER)
+		var sg_node = _sg.build()
+		sg_node.visible = false   # hidden until populate() is called
+		sec.add_child(sg_node)
+		_sg.on_item_selected = funcref(self, "_on_texture_selected")
 
 		sec.add_child(_spacer(6))
 
@@ -976,11 +1101,11 @@ class RoofPanel:
 
 		return sec
 
-	## Lazily populate the texture ItemList from RoofTool.Controls["Texture"].
+	## Lazily populate the texture grid from RoofTool.Controls["Texture"].
 	## Also syncs width/type/sorting defaults from the current RoofTool state.
-	## Safe to call multiple times — exits early if already built.
+	## Safe to call multiple times.
 	func try_build_grid_menu(gl) -> void:
-		if _menu_container == null:
+		if _sg == null:
 			return
 
 		if not gl.Editor or not gl.Editor.Tools.has("RoofTool"):
@@ -990,7 +1115,7 @@ class RoofPanel:
 		var rt = gl.Editor.Tools["RoofTool"]
 		_roof_tool = rt
 
-		# Sync defaults from current RoofTool state (always, even without grid)
+		# Sync defaults from current RoofTool state (always, even without grid).
 		var rt_width = rt.get("Width")
 		if rt_width and rt_width.get("value") != null and width_spin:
 			width_spin.value = rt_width.value
@@ -1006,11 +1131,11 @@ class RoofPanel:
 			type_option.selected = rt_type
 			if _cb_type: _cb_type.call_func(rt_type)
 
-		# Guard: don't rebuild grid if already done
-		if _grid_menu != null:
+		# Guard: don't rebuild grid if already populated.
+		if _populated:
 			return
 
-		# Try to get the texture GridMenu from RoofTool
+		# Try to get the texture GridMenu from RoofTool.
 		var controls = rt.get("Controls")
 		if not controls or not controls.has("Texture"):
 			if LOGGER: LOGGER.info("RoofPanel: RoofTool.Controls[Texture] not available — using RoofTool selection.")
@@ -1034,66 +1159,42 @@ class RoofPanel:
 		for path in lookup.keys():
 			_index_to_path[lookup[path]] = path
 
-		var scroll = ScrollContainer.new()
-		scroll.rect_min_size = Vector2(0, 160)
-		scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-		_grid_menu = ItemList.new()
-		_grid_menu.icon_mode = ItemList.ICON_MODE_TOP
-		_grid_menu.fixed_icon_size = Vector2(48, 48)
-		_grid_menu.fixed_column_width = 56
-		_grid_menu.max_columns = 0
-		_grid_menu.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_grid_menu.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		_grid_menu.connect("item_selected", self, "_on_texture_selected")
-
+		var items = []
 		for i in range(count):
-			var icon = source_menu.get_item_icon(i)
+			var icon    = source_menu.get_item_icon(i)
 			var tooltip = _index_to_path.get(i, str(i)).get_file().get_basename()
-			if icon:
-				_grid_menu.add_item("", icon)
-			else:
-				_grid_menu.add_item(tooltip)
-			_grid_menu.set_item_tooltip(_grid_menu.get_item_count() - 1, tooltip)
+			items.append({ "icon": icon, "tooltip": tooltip, "modulate": Color.white })
 
-		scroll.add_child(_grid_menu)
+		_sg.populate(items)
+		_populated = true
 
-		# Hide fallback label and show the real grid
+		# Show grid, hide fallback label.
 		if _no_grid_label:
 			_no_grid_label.visible = false
-		_menu_container.add_child(scroll)
+		if _sg._container:
+			_sg._container.visible = true
 
-		var restore_idx: int = min(_selected_index, count - 1)
-		_grid_menu.select(restore_idx)
-		_on_texture_selected(restore_idx)
+		if LOGGER: LOGGER.info("RoofPanel: populated with %d items." % count)
 
-		if LOGGER: LOGGER.info("RoofPanel: ItemList built with %d items." % count)
-
-	## Tear down the ItemList and free all child nodes from the container.
+	## Tear down the grid items. UI nodes remain; only data is cleared.
 	func release() -> void:
-		if _grid_menu:
-			var sel: Array = _grid_menu.get_selected_items()
-			if not sel.empty():
-				_selected_index = sel[0]
-			if _grid_menu.is_connected("item_selected", self, "_on_texture_selected"):
-				_grid_menu.disconnect("item_selected", self, "_on_texture_selected")
-			for child in _menu_container.get_children():
-				_menu_container.remove_child(child)
-				child.queue_free()
-			_grid_menu = null
+		if _populated:
+			_sg.clear()
+			_populated = false
 			_source_menu = null
 			_index_to_path.clear()
-			# Restore fallback label
-			if _no_grid_label and not _no_grid_label.get_parent():
-				_menu_container.add_child(_no_grid_label)
+			# Restore fallback label.
+			if _no_grid_label:
 				_no_grid_label.visible = true
+			if _sg._container:
+				_sg._container.visible = false
 		_roof_tool = null
 
 	# ---- internal callbacks ----
 
-	func _on_texture_selected(index: int):
+	func _on_texture_selected(original_index: int):
 		if _source_menu and _source_menu.has_method("OnItemSelected"):
-			_source_menu.OnItemSelected(index)
+			_source_menu.OnItemSelected(original_index)
 		if _roof_tool:
 			var tex = _roof_tool.get("Texture")
 			if tex and _cb_texture:

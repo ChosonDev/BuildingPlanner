@@ -5,6 +5,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.2.1] — 2026-05-01
+
+### Added
+- **Search field in texture grids.** All four texture selection grids (Pattern Fill,
+  Wall Builder, Path Builder, Roof Builder) now have a search/filter field above the
+  grid. Typing filters items in real time; a clear (×) button resets the filter.
+  Keyboard shortcuts are suppressed while the field has focus so letters reach the
+  search box instead of Dungeondraft's tool shortcuts.
+
+### Technical
+- New `SearchableGrid` inner class in `BuildingPlannerToolUI.gd` encapsulates a
+  `LineEdit` + clear `Button` + `ItemList` inside a `ScrollContainer`. Filtering
+  uses word-by-word substring matching (identical to AdditionalSearchOptions).
+  `on_item_selected` callback receives the original DD index, so `OnItemSelected`
+  calls on source GridMenus remain correct after filtering.
+- `PatternPanel`, `WallPanel`, `PathPanel`, `RoofPanel` refactored to use
+  `SearchableGrid` instead of building the `ItemList` manually.
+
+---
+
 ## [1.2.0] — 2026-05-01
 
 ### Added

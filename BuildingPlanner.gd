@@ -60,7 +60,7 @@ func start():
 
 		if self.Global.API and self.Global.API.has("Logger"):
 			LOGGER = self.Global.API.Logger.for_class(CLASS_NAME)
-			LOGGER.info("Mod starting - version 1.2.0")
+			LOGGER.info("Mod starting - version 1.2.1")
 
 			# Register UpdateChecker for version tracking in the Mod Versions menu
 			if self.Global.API.has("UpdateChecker"):
