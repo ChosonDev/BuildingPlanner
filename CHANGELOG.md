@@ -5,6 +5,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.1.9] — 2026-05-01
+
+### Changed
+- **Release packaging** — the ZIP archive now contains a `BuildingPlanner/` subfolder
+  instead of placing files at the archive root.  
+  Files `.gitignore` and `.gitmodules` are excluded from the release.
+
+---
+
 ## [1.1.8] — 2026-05-01
 
 ### Added

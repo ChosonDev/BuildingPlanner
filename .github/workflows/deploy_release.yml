@@ -31,7 +31,11 @@ jobs:
     - name: Remove dependencies folder
       run: rm -rf dependencies
     - name: Zip Release
-      run: zip -r BuildingPlanner.zip . -x ".git/*" ".github/*" "dependencies/*"
+      run: |
+        mkdir -p /tmp/release/BuildingPlanner
+        rsync -a --exclude='.git' --exclude='.github' --exclude='.gitignore' --exclude='.gitmodules' . /tmp/release/BuildingPlanner/
+        cd /tmp/release
+        zip -r $GITHUB_WORKSPACE/BuildingPlanner.zip BuildingPlanner
     - name: Deploy Release
       uses: softprops/action-gh-release@v2
       with:
