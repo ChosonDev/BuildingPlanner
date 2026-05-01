@@ -5,6 +5,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.2.2] — 2026-05-01
+
+### Fixed
+- **Pattern Fill: custom pack textures no longer produce untextured shapes.**
+  `PatternPanel` now filters out patterns whose texture is not registered in
+  Godot's `ResourceLoader` (i.e. textures from custom asset packs without
+  `.import` files). Only patterns that can be reliably loaded and applied via
+  `SetOptions()` are shown in the panel.
+
+---
+
 ## [1.2.1] — 2026-05-01
 
 ### Added

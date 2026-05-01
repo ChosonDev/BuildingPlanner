@@ -355,28 +355,35 @@ class PatternPanel:
 
 		_pst = gl.Editor.Tools["PatternShapeTool"]
 
-		# Invert to { original_index: resource_path }
-		_index_to_path.clear()
+		# Build source_index → path mapping from the inverted Lookup dict.
+		var source_index_to_path: Dictionary = {}
 		for path in lookup.keys():
-			_index_to_path[lookup[path]] = path
+			source_index_to_path[lookup[path]] = path
 
 		# Build item array for SearchableGrid.
-		# Use the already-loaded icon — custom pack textures are not registered
-		# in Godot's ResourceLoader (no .import files), so ResourceLoader.load
-		# would log "No loader found" errors for every custom asset.
+		# Only include patterns whose texture is registered in ResourceLoader
+		# (has a .import file). Custom pack textures are loaded by Dungeondraft's
+		# own pipeline and absent from ResourceLoader — they would cause
+		# "No loader found" errors and produce untextured shapes.
+		# _index_to_path is rebuilt with sequential indices matching items[].
+		_index_to_path.clear()
 		var items = []
 		for i in range(count):
-			var icon    = source_menu.get_item_icon(i)
-			var tooltip = _index_to_path.get(i, str(i)).get_file().get_basename()
+			var path: String = source_index_to_path.get(i, "")
+			if path == "" or not ResourceLoader.exists(path, "Texture"):
+				continue
+			var icon      = source_menu.get_item_icon(i)
+			var tooltip   = path.get_file().get_basename()
 			var mod_color = Color.white
 			if icon and _pst and _pst.has_method("GetDefaultColor"):
 				mod_color = _pst.GetDefaultColor(icon)
+			_index_to_path[items.size()] = path
 			items.append({ "icon": icon, "tooltip": tooltip, "modulate": mod_color })
 
 		_sg.populate(items)
 		_populated = true
 
-		if LOGGER: LOGGER.info("PatternPanel: populated with %d items." % count)
+		if LOGGER: LOGGER.info("PatternPanel: populated with %d/%d items (custom pack textures excluded)." % [items.size(), count])
 
 	## Tear down the grid items. UI nodes remain; only data is cleared.
 	func release() -> void:
@@ -393,10 +400,10 @@ class PatternPanel:
 		var path: String = _index_to_path.get(original_index, "")
 		if path == "":
 			return
-		# Pattern textures are loaded by Dungeondraft via ResourceLoader and remain
-		# in its cache, so load(path) returns the correct cached Texture object.
-		# This is required so that PatternShapeTool.SetOptions() receives the exact
-		# Texture instance DD uses for rendering (icon from ItemList is not the same).
+		# Only paths that passed ResourceLoader.exists() at populate time reach here,
+		# so load() is guaranteed to succeed. The exact Texture instance from
+		# ResourceLoader is required — the icon from ItemList is not the same object
+		# and PatternShapeTool.SetOptions() needs the real cached Texture.
 		var tex = ResourceLoader.load(path, "Texture", false)
 		if _cb_texture: _cb_texture.call_func(tex)
 		# Sync color picker to the DD default color for this texture.
