@@ -6,6 +6,15 @@ extends Reference
 const CLASS_NAME = "BuildingPlannerUtils"
 
 # ============================================================================
+# LAYER CONSTANTS
+# ============================================================================
+
+## Default layer z_index for patterns and paths (User Layer 1).
+## Used as fallback when LayerApi is unavailable or the stored layer is absent
+## from the current map.
+const DEFAULT_LAYER: int = 100
+
+# ============================================================================
 # GEOMETRY
 # ============================================================================
 

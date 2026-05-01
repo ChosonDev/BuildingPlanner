@@ -47,7 +47,7 @@ class PatternPanel:
 
 	var color_picker  = null   # ColorPickerButton
 	var rotation_spin = null   # SpinBox
-	var layer_spin    = null   # SpinBox
+	var layer_option  = null   # OptionButton
 	var outline_check = null   # CheckButton
 
 	# ---- callbacks (FuncRef) ----
@@ -98,13 +98,10 @@ class PatternPanel:
 		sec.add_child(rotation_spin)
 
 		sec.add_child(_label("Layer:"))
-		layer_spin = SpinBox.new()
-		layer_spin.min_value = 0
-		layer_spin.max_value = 9
-		layer_spin.step = 1
-		layer_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		layer_spin.connect("value_changed", self, "_on_layer_changed")
-		sec.add_child(layer_spin)
+		layer_option = OptionButton.new()
+		layer_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		layer_option.connect("item_selected", self, "_on_layer_changed")
+		sec.add_child(layer_option)
 
 		outline_check = CheckButton.new()
 		outline_check.text = "Outline"
@@ -233,8 +230,9 @@ class PatternPanel:
 	func _on_rotation_changed(value: float):
 		if _cb_rotation: _cb_rotation.call_func(value)
 
-	func _on_layer_changed(value: float):
-		if _cb_layer: _cb_layer.call_func(int(value))
+	func _on_layer_changed(index: int):
+		if _cb_layer and layer_option:
+			_cb_layer.call_func(layer_option.get_item_id(index))
 
 	func _on_outline_toggled(pressed: bool):
 		if _cb_outline: _cb_outline.call_func(pressed)
@@ -250,6 +248,34 @@ class PatternPanel:
 		var s = Control.new()
 		s.rect_min_size = Vector2(0, height)
 		return s
+
+	## Rebuild the layer OptionButton from LayerApi and restore [current_z_index].
+	## Call on panel show, on mode switch, and on layers_changed signal.
+	func refresh_layer_option(gl, current_z_index: int) -> void:
+		if not layer_option:
+			return
+		layer_option.clear()
+		var user_layers: Dictionary = {}
+		if gl and gl.API and gl.API.has("LayerApi") and gl.World and gl.World.GetCurrentLevel():
+			user_layers = gl.API.LayerApi.get_user_layers(gl.World.GetCurrentLevel())
+		if user_layers.empty():
+			user_layers = {100: "User Layer 1"}
+		var keys: Array = user_layers.keys()
+		keys.sort()
+		for z in keys:
+			layer_option.add_item(str(z) + ": " + user_layers[z])
+			layer_option.set_item_id(layer_option.get_item_count() - 1, z)
+		var target: int = current_z_index if user_layers.has(current_z_index) else 100
+		_select_layer_option(target)
+
+	## Select the OptionButton item whose id matches [z_index].
+	func _select_layer_option(z_index: int) -> void:
+		if not layer_option:
+			return
+		for i in range(layer_option.get_item_count()):
+			if layer_option.get_item_id(i) == z_index:
+				layer_option.select(i)
+				return
 
 
 # ============================================================================
@@ -488,7 +514,7 @@ class PathPanel:
 	var color_picker      = null   # ColorPickerButton
 	var width_spin        = null   # SpinBox
 	var smoothness_slider = null   # HSlider
-	var layer_spin        = null   # SpinBox
+	var layer_option      = null   # OptionButton
 	var sorting_option    = null   # OptionButton
 	
 	# Effects
@@ -568,13 +594,10 @@ class PathPanel:
 		sec.add_child(smoothness_slider)
 
 		sec.add_child(_label("Layer:"))
-		layer_spin = SpinBox.new()
-		layer_spin.min_value = 0
-		layer_spin.max_value = 9
-		layer_spin.step = 1
-		layer_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		layer_spin.connect("value_changed", self, "_on_layer_changed")
-		sec.add_child(layer_spin)
+		layer_option = OptionButton.new()
+		layer_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		layer_option.connect("item_selected", self, "_on_layer_changed")
+		sec.add_child(layer_option)
 
 		sec.add_child(_label("Sorting:"))
 		sorting_option = OptionButton.new()
@@ -741,8 +764,9 @@ class PathPanel:
 	func _on_smoothness_changed(value: float):
 		if _cb_smoothness: _cb_smoothness.call_func(value)
 
-	func _on_layer_changed(value: float):
-		if _cb_layer: _cb_layer.call_func(int(value))
+	func _on_layer_changed(index: int):
+		if _cb_layer and layer_option:
+			_cb_layer.call_func(layer_option.get_item_id(index))
 
 	func _on_sorting_selected(index: int):
 		if _cb_sorting: _cb_sorting.call_func(index)
@@ -773,6 +797,34 @@ class PathPanel:
 		var s = Control.new()
 		s.rect_min_size = Vector2(0, height)
 		return s
+
+	## Rebuild the layer OptionButton from LayerApi and restore [current_z_index].
+	## Call on panel show, on mode switch, and on layers_changed signal.
+	func refresh_layer_option(gl, current_z_index: int) -> void:
+		if not layer_option:
+			return
+		layer_option.clear()
+		var user_layers: Dictionary = {}
+		if gl and gl.API and gl.API.has("LayerApi") and gl.World and gl.World.GetCurrentLevel():
+			user_layers = gl.API.LayerApi.get_user_layers(gl.World.GetCurrentLevel())
+		if user_layers.empty():
+			user_layers = {100: "User Layer 1"}
+		var keys: Array = user_layers.keys()
+		keys.sort()
+		for z in keys:
+			layer_option.add_item(str(z) + ": " + user_layers[z])
+			layer_option.set_item_id(layer_option.get_item_count() - 1, z)
+		var target: int = current_z_index if user_layers.has(current_z_index) else 100
+		_select_layer_option(target)
+
+	## Select the OptionButton item whose id matches [z_index].
+	func _select_layer_option(z_index: int) -> void:
+		if not layer_option:
+			return
+		for i in range(layer_option.get_item_count()):
+			if layer_option.get_item_id(i) == z_index:
+				layer_option.select(i)
+				return
 
 
 # ============================================================================
@@ -1361,9 +1413,24 @@ func try_build_all_grid_menus() -> void:
 	# Enable path color pickers only when ColourAndModifyThings is installed
 	_pb_path_panel.update_camt_color_state(gl)
 	_rb_path_panel.update_camt_color_state(gl)
+	# Populate layer dropdowns with current map's user layers
+	_refresh_all_layer_options(gl)
+	# Subscribe to layers_changed so dropdowns stay in sync if ManageLayers
+	# adds/renames/removes a layer while the tool is active.
+	if gl.API and gl.API.has("ModSignalingApi"):
+		var msa = gl.API.ModSignalingApi
+		if msa.has_user_signal("layers_changed") and \
+				not msa.is_connected("layers_changed", self, "_on_layers_changed"):
+			msa.connect("layers_changed", self, "_on_layers_changed")
 
 ## Called on Disable() — tears down all grid menus.
 func release_all_grid_menus() -> void:
+	if _tool and _tool.parent_mod:
+		var gl = _tool.parent_mod.Global
+		if gl.API and gl.API.has("ModSignalingApi"):
+			var msa = gl.API.ModSignalingApi
+			if msa.is_connected("layers_changed", self, "_on_layers_changed"):
+				msa.disconnect("layers_changed", self, "_on_layers_changed")
 	_pf_pattern_panel.release()
 	_wb_wall_panel.release()
 	_pb_path_panel.release()
@@ -1382,6 +1449,9 @@ func _show_section(mode: int):
 	if _pb_section: _pb_section.visible = (mode == MODE_PATH_BUILDER)
 	if _rb_section: _rb_section.visible = (mode == MODE_ROOM_BUILDER)
 	if _rf_section: _rf_section.visible = (mode == MODE_ROOF_BUILDER)
+	# Refresh layer dropdowns so they reflect the active map's layers.
+	if _tool and _tool.parent_mod:
+		_refresh_all_layer_options(_tool.parent_mod.Global)
 
 # ============================================================================
 # CALLBACKS — MODE
@@ -1391,6 +1461,28 @@ func _on_mode_selected(index):
 	var mode = _mode_selector.get_item_id(index)
 	_tool._set_mode(mode)
 	_show_section(mode)
+
+# ============================================================================
+# LAYER REFRESH HELPERS
+# ============================================================================
+
+## Refreshes all four layer OptionButtons from the current map's LayerApi data.
+func _refresh_all_layer_options(gl) -> void:
+	if not gl:
+		return
+	var pf_layer = _tool._pattern_fill.active_layer  if _tool._pattern_fill  else 100
+	var pb_layer = _tool._path_builder.active_layer  if _tool._path_builder  else 100
+	var rb_layer = _tool._room_builder.active_layer  if _tool._room_builder  else 100
+	var rp_layer = _tool._room_builder.active_path_layer if _tool._room_builder else 100
+	_pf_pattern_panel.refresh_layer_option(gl, pf_layer)
+	_pb_path_panel.refresh_layer_option(gl, pb_layer)
+	_rb_pattern_panel.refresh_layer_option(gl, rb_layer)
+	_rb_path_panel.refresh_layer_option(gl, rp_layer)
+
+## Signal handler: fired by ManageLayers / LayerApi when layers change.
+func _on_layers_changed() -> void:
+	if _tool and _tool.parent_mod:
+		_refresh_all_layer_options(_tool.parent_mod.Global)
 
 # ============================================================================
 # CALLBACKS — PATTERN FILL

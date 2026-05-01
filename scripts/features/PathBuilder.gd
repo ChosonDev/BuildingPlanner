@@ -35,7 +35,7 @@ var _parent_mod = null
 var active_color:      Color = Color.white
 var active_width:      float = 1.0          # path width
 var active_smoothness: float = 0.0          # smoothness (0.0 - 1.0)
-var active_layer:      int   = 0            # layer (0-9)
+var active_layer:      int   = 100          # layer z_index — 100 = User Layer 1
 var active_sorting:    int   = 0            # 0 = Over, 1 = Under
 var active_fade_in:    bool  = false        # fade in effect
 var active_fade_out:   bool  = false        # fade out effect

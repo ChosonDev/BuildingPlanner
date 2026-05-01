@@ -31,7 +31,7 @@ var active_texture = null    # Texture — selected in our own GridMenu
 var active_color: Color = Color.white
 var active_rotation: float = 0.0   # degrees
 var active_outline: bool = false
-var active_layer: int = 0
+var active_layer: int = 100  # layer z_index — 100 = User Layer 1
 
 # ============================================================================
 # INIT
@@ -86,18 +86,25 @@ func fill_at(coords: Vector2) -> bool:
 	var pattern_shapes = _global.World.Level.PatternShapes
 
 	# --- Snapshot existing shapes to identify newly created ones ---
-	var shapes_before: Array = pattern_shapes.GetShapes()
-	var count_before: int = shapes_before.size()
+	# NOTE: Use instance-id set-difference, NOT index range.
+	# DrawPolygon() places the new shape on PatternShapeTool.ActiveLayer, which may be
+	# a different layer-node than active_layer. Layer nodes are ordered by creation time
+	# in the scene tree, so GetShapes() can return the new shape at ANY index — not
+	# necessarily at the end. An index-based range(count_before, after.size()) would
+	# point at pre-existing shapes instead of the newly created one.
+	var ids_before: Dictionary = {}
+	for s in pattern_shapes.GetShapes():
+		ids_before[s.get_instance_id()] = true
 
 	# --- Create the PatternShape ---
 	pattern_shapes.DrawPolygon(PoolVector2Array(polygon), false)
 
 	# --- Apply settings to newly created shape(s) ---
-	var shapes_after: Array = pattern_shapes.GetShapes()
 	var new_shapes: Array = []
-	for i in range(count_before, shapes_after.size()):
-		var shape = shapes_after[i]
+	for shape in pattern_shapes.GetShapes():
 		if not shape or not is_instance_valid(shape):
+			continue
+		if ids_before.has(shape.get_instance_id()):
 			continue
 		if active_texture:
 			shape.SetOptions(active_texture, active_color, deg2rad(active_rotation))

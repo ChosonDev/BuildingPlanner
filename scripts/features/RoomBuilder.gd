@@ -36,7 +36,7 @@ var _registry   = null   # MarkerObjectRegistry
 var active_texture   = null           # Texture
 var active_color:    Color = Color.white
 var active_rotation: float = 0.0      # degrees
-var active_layer:    int   = 0
+var active_layer:    int   = 100       # pattern layer z_index — 100 = User Layer 1
 var active_outline:  bool  = false
 
 # ============================================================================
@@ -62,7 +62,7 @@ var active_wall_color: Color = Color.white
 var active_path_color:       Color = Color.white
 var active_path_width:       float = 1.0
 var active_path_smoothness:  float = 0.0
-var active_path_layer:       int   = 0
+var active_path_layer:       int   = 100  # path layer z_index — 100 = User Layer 1
 var active_path_sorting:     int   = 0   # 0 = Over, 1 = Under
 var active_path_fade_in:     bool  = false
 var active_path_fade_out:    bool  = false
@@ -661,16 +661,19 @@ func _fill_pattern(polygon: Array) -> Array:
 		return []
 
 	var pattern_shapes = _global.World.Level.PatternShapes
-	var shapes_before: Array = pattern_shapes.GetShapes()
-	var count_before: int = shapes_before.size()
+	# Snapshot by instance id — DrawPolygon may insert the new shape at any
+	# position in GetShapes() depending on which layer-node it lands on.
+	var ids_before: Dictionary = {}
+	for s in pattern_shapes.GetShapes():
+		ids_before[s.get_instance_id()] = true
 
 	pattern_shapes.DrawPolygon(PoolVector2Array(polygon), false)
 
-	var shapes_after: Array = pattern_shapes.GetShapes()
 	var new_shapes: Array = []
-	for i in range(count_before, shapes_after.size()):
-		var shape = shapes_after[i]
+	for shape in pattern_shapes.GetShapes():
 		if not shape or not is_instance_valid(shape):
+			continue
+		if ids_before.has(shape.get_instance_id()):
 			continue
 		shape.SetOptions(active_texture, active_color, deg2rad(active_rotation))
 		shape.SetLayer(active_layer)

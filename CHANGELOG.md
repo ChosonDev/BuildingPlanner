@@ -5,6 +5,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.1.8] — 2026-05-01
+
+### Added
+- **Layer selection for Pattern Fill and Path Builder.**  
+  The layer controls in the *Pattern Fill* and *Path Builder* panels (and the corresponding
+  sub-panels inside *Room Builder*) have been replaced with dynamic **OptionButton** dropdowns.  
+  Items are populated from `LayerApi.get_user_layers()` and show the z-index together with
+  the human-readable layer name (e.g. `100: User Layer 1`).  
+  The dropdown refreshes automatically whenever the active mode changes, on tool activation,
+  and whenever `ModSignalingApi.layers_changed` fires (i.e. when ManageLayers adds, renames,
+  or removes a layer).  
+  A fallback entry `100: User Layer 1` is shown when `LayerApi` is unavailable.
+
+---
+
 ## [1.1.7] — 2026-03-01
 
 ### Added
