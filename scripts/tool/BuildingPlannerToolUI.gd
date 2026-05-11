@@ -361,16 +361,12 @@ class PatternPanel:
 			source_index_to_path[lookup[path]] = path
 
 		# Build item array for SearchableGrid.
-		# Only include patterns whose texture is registered in ResourceLoader
-		# (has a .import file). Custom pack textures are loaded by Dungeondraft's
-		# own pipeline and absent from ResourceLoader — they would cause
-		# "No loader found" errors and produce untextured shapes.
 		# _index_to_path is rebuilt with sequential indices matching items[].
 		_index_to_path.clear()
 		var items = []
 		for i in range(count):
 			var path: String = source_index_to_path.get(i, "")
-			if path == "" or not ResourceLoader.exists(path, "Texture"):
+			if path == "":
 				continue
 			var icon      = source_menu.get_item_icon(i)
 			var tooltip   = path.get_file().get_basename()
@@ -383,7 +379,7 @@ class PatternPanel:
 		_sg.populate(items)
 		_populated = true
 
-		if LOGGER: LOGGER.info("PatternPanel: populated with %d/%d items (custom pack textures excluded)." % [items.size(), count])
+		if LOGGER: LOGGER.info("PatternPanel: populated with %d items." % items.size())
 
 	## Tear down the grid items. UI nodes remain; only data is cleared.
 	func release() -> void:
@@ -396,15 +392,27 @@ class PatternPanel:
 
 	# ---- internal callbacks ----
 
+	func _load_texture_safe(path: String) -> Texture:
+		if ResourceLoader.exists(path, "Texture"):
+			return ResourceLoader.load(path, "Texture", false)
+		
+		# Fallback for custom packs (raw .png without .import)
+		var img = Image.new()
+		var err = img.load(path)
+		if err == OK:
+			var tex = ImageTexture.new()
+			tex.create_from_image(img, 7) # TEXTURE_FLAGS_DEFAULT
+			tex.take_over_path(path)
+			return tex
+			
+		return null
+
 	func _on_texture_selected(original_index: int):
 		var path: String = _index_to_path.get(original_index, "")
 		if path == "":
 			return
-		# Only paths that passed ResourceLoader.exists() at populate time reach here,
-		# so load() is guaranteed to succeed. The exact Texture instance from
-		# ResourceLoader is required — the icon from ItemList is not the same object
-		# and PatternShapeTool.SetOptions() needs the real cached Texture.
-		var tex = ResourceLoader.load(path, "Texture", false)
+		
+		var tex = _load_texture_safe(path)
 		if _cb_texture: _cb_texture.call_func(tex)
 		# Sync color picker to the DD default color for this texture.
 		# PatternShapeTool.GetDefaultColor(texture) is the pattern equivalent

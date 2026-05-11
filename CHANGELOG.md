@@ -5,6 +5,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.2.3] — 2026-05-11
+
+### Fixed
+- **Pattern Fill: Colorable textures from custom packs are now supported.**
+  `PatternPanel` now correctly preserves the texture's resource path, allowing Dungeondraft's native C# backend to recognize colorable textures loaded via Godot's `Image.load()` fallback and apply the correct shader.
+
+---
+
 ## [1.2.2] — 2026-05-01
 
 ### Fixed
