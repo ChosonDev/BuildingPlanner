@@ -20,6 +20,8 @@ Thumbs.db
 .vscode/
 *.code-workspace
 .github/copilot-instructions.md
+AGENTS.md
+.agents/
 
 # Build artifacts
 *.o
