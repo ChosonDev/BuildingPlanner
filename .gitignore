@@ -21,6 +21,7 @@ Thumbs.db
 *.code-workspace
 .github/copilot-instructions.md
 AGENTS.md
+TODO.md
 .agents/
 
 # Build artifacts
