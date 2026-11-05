@@ -37,3 +37,10 @@ TODO.md
 dependencies/*
 !dependencies/_Lib
 !dependencies/GuidesLines
+
+# Standalone test dependencies and generated output
+tests/addons/
+tests/results/
+tests/.cache/
+tests/logs/
+__pycache__/

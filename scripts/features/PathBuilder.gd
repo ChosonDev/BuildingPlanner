@@ -1,16 +1,15 @@
 extends Reference
 
 # BuildingPlanner - Dungeondraft Mod
-# PathBuilder: places a path along the outline of a Shape marker under a click.
+# PathBuilder: traces a nearby Path marker or a filled Shape outline.
 #
 # Workflow:
 #   1. User clicks on the map while Path Builder mode is active.
-#   2. BuildingPlannerTool.handle_path_builder_click(world_pos) is called.
-#   3. GuidesLinesApi.compute_fill_polygon(coords) resolves the polygon.
-#   4. Pathways.CreatePath(texture, layer, sorting, ...) creates the path.
-#   5. Pathway.SetEditPoints(points) + Smooth() + SetWidthScale() configure it.
+#   2. BuildingPlannerTool.handle_canvas_click(world_pos) is called.
+#   3. Resolve a nearby Path marker, falling back to compute_fill_polygon(coords).
+#   4. Pathways.LoadPathway(data) creates and initializes the native path.
 #
-# Texture source: PathTool.Texture (mirrored via Controls["Texture"] GridMenu).
+# Texture source: active_texture, captured by this feature's PathPanel.
 # Width/Smoothness/Effects: controlled by PathPanel UI elements.
 # Requires GuidesLines >= 2.2.0 (compute_fill_polygon).
 
@@ -30,12 +29,12 @@ var _parent_mod = null
 # SETTINGS
 # ============================================================================
 
-# Texture is always read from PathTool at click time (our GridMenu drives it via
-# OnItemSelected). Other settings are stored here so the UI controls have effect.
+# The feature owns its selection independently of the built-in tool.
+var active_texture = null
 var active_color:      Color = Color.white
 var active_width:      float = 1.0          # path width
 var active_smoothness: float = 0.0          # smoothness (0.0 - 1.0)
-var active_layer:      int   = 100          # layer z_index — 100 = User Layer 1
+var active_layer:      int   = BuildingPlannerUtils.DEFAULT_LAYER          # layer z_index — 100 = User Layer 1
 var active_sorting:    int   = 0            # 0 = Over, 1 = Under
 var active_fade_in:    bool  = false        # fade in effect
 var active_fade_out:   bool  = false        # fade out effect
@@ -56,136 +55,81 @@ func _init(gl_api, logger, parent_mod = null):
 # BUILD BY WORLD POSITION
 # ============================================================================
 
-## Builds a path along the Shape marker outline under [coords] (world-space).
+## Traces a Path marker near [coords], or the enclosing Shape region (world-space).
 ## Requires GuidesLines >= 2.2.0. Returns true on success.
 func build_at(coords: Vector2) -> bool:
-	if not _gl_api:
-		if LOGGER: LOGGER.error("%s: GuidesLinesApi not available." % CLASS_NAME)
+	var outline = BuildingPlannerUtils.resolve_outline(_gl_api, coords, LOGGER)
+	if outline.empty():
 		return false
 
-	if not _gl_api.has_method("compute_fill_polygon"):
-		if LOGGER: LOGGER.error(
-			"%s: compute_fill_polygon not found in GuidesLinesApi." % CLASS_NAME + "\n" +
-			"  Update GuidesLines to v2.2.0+ in your Dungeondraft mods folder.")
+	var path = _create_path(outline.points, null, outline.closed)
+	if not is_instance_valid(path):
 		return false
+	BuildingPlannerHistory.record_action(_parent_mod, LOGGER, BuildingPlannerHistory.PathBuilderRecord.new(_parent_mod, path))
+	return true
 
-	if _gl_api.has_method("is_ready") and not _gl_api.is_ready():
-		if LOGGER: LOGGER.warn("%s: GuidesLinesApi not ready yet (map still loading?)" % CLASS_NAME)
-		return false
+## Snapshot the complete style; callers own the returned Dictionary.
+func get_settings() -> Dictionary:
+	return {
+		"active_texture": active_texture,
+		"active_color": active_color,
+		"active_width": active_width,
+		"active_smoothness": active_smoothness,
+		"active_layer": active_layer,
+		"active_sorting": active_sorting,
+		"active_fade_in": active_fade_in,
+		"active_fade_out": active_fade_out,
+		"active_grow": active_grow,
+		"active_shrink": active_shrink,
+		"active_block_light": active_block_light,
+	}
 
-	if not _parent_mod:
-		if LOGGER: LOGGER.error("%s: parent_mod not set." % CLASS_NAME)
-		return false
-
-	# --- Resolve polygon via GuidesLinesApi ---
-	var result = _gl_api.compute_fill_polygon(coords)
-	if typeof(result) != TYPE_DICTIONARY:
-		return false
-
-	var polygon: Array = result.get("polygon", [])
-	if polygon.empty():
-		if LOGGER: LOGGER.warn("%s: empty polygon returned at %s." % [CLASS_NAME, str(coords)])
-		return false
-
-	# Close the polygon by adding first point at the end (Line2D doesn't have built-in closed property)
-	if polygon.size() > 0:
-		polygon.append(polygon[0])
-
+## Explicit saved settings leave the live UI selection untouched.
+func _create_path(polygon: Array, level = null, closed: bool = true, settings = null):
+	if settings == null:
+		settings = get_settings()
 	# --- Access Pathways for path creation ---
-	var _global = _parent_mod.Global
-	if not _global.World or not _global.World.Level:
+	level = BuildingPlannerUtils.resolve_level(_parent_mod, level)
+	if not level:
 		if LOGGER: LOGGER.error("%s: World/Level not loaded." % CLASS_NAME)
-		return false
-
-	var pathways = _global.World.Level.Pathways
+		return null
+	var pathways = level.Pathways
 	if not pathways:
 		if LOGGER: LOGGER.error("%s: Pathways node not found in Level." % CLASS_NAME)
-		return false
+		return null
 
-	# Get texture from PathTool
-	var path_texture = null
-	if _global.Editor and _global.Editor.Tools.has("PathTool"):
-		var pt = _global.Editor.Tools["PathTool"]
-		path_texture = pt.Texture
-	else:
-		if LOGGER: LOGGER.warn("%s: PathTool not found, using defaults." % CLASS_NAME)
+	# Use this feature's selected texture
+	var path_texture = settings.active_texture
+	if not path_texture is Texture:
+		if LOGGER: LOGGER.error("PathBuilder: select a valid texture before building.")
+		return null
 
-	# Create path using CreatePath API
-	var new_path = pathways.CreatePath(
-		path_texture,
-		active_layer,
-		active_sorting,
-		active_fade_in,
-		active_fade_out,
-		active_grow,
-		active_shrink
-	)
-	
-	if not new_path:
-		if LOGGER: LOGGER.error("%s: CreatePath returned null." % CLASS_NAME)
-		return false
-
-	# Configure path properties
-	new_path.position = Vector2.ZERO
-	new_path.SetEditPoints(PoolVector2Array(polygon))
-	new_path.Smoothness = active_smoothness
-	new_path.Smooth()
-	new_path.SetWidthScale(active_width)
-	new_path.modulate = active_color
-	
-	if active_block_light:
-		new_path.SetBlockLight(true)
-
-	# Set metadata for SelectTool integration (lowercase "node_id" required by C# code)
-	# Find max node_id from existing paths
-	var max_node_id = 0  # Start from 1, not 0
-	for child in pathways.get_children():
-		if child == new_path:
-			continue
-		if child.has_meta("node_id"):
-			var nid = child.get_meta("node_id")
-			if typeof(nid) == TYPE_INT and nid > max_node_id:
-				max_node_id = nid
-	
-	# Assign node_id and preview metadata
-	var new_node_id = max_node_id + 1
-	new_path.set_meta("node_id", new_node_id)
-	new_path.set_meta("preview", false)
-
-	# Register path via Save/Load cycle (mimics map loading for proper Editor registration)
-	var path_data = new_path.Save(false)
-	
-	if not path_data or path_data.empty():
-		if LOGGER: LOGGER.error("%s: Save() returned empty data!" % CLASS_NAME)
-		return false
-	
-	# Get the path's position in parent before removing
-	var path_index = new_path.get_index()
-	
-	# Remove the temporary path
-	new_path.queue_free()
-	
-	# Load it back through LoadPathway (proper initialization)
-	var loaded_path = pathways.LoadPathway(path_data)
-	
-	if not loaded_path:
-		if LOGGER: LOGGER.error("%s: LoadPathway() returned null!" % CLASS_NAME)
-		return false
-	
-	# Restore original position in tree
-	pathways.move_child(loaded_path, path_index)
-
-	# Re-apply color: LoadPathway() resets modulate to white, so we must set it
-	# again after loading. Store it in CAMT's ModMapData for map save/reload
-	# persistence when ColourAndModifyThings is installed.
-	if active_color != Color.white:
-		loaded_path.modulate = active_color
-		if loaded_path.has_meta("node_id"):
-			BuildingPlannerUtils.store_path_color_for_camt(
-				_parent_mod.Global,
-				loaded_path.get_meta("node_id"),
-				active_color
-			)
-
-	if LOGGER: LOGGER.info("%s: path built with %d points." % [CLASS_NAME, polygon.size()])
-	return true
+	# Match Pathway.Save / DictionaryEx; native Load initializes IDs, preview,
+	# gradient and occlusion without constructing a temporary path first.
+	var origin = polygon[0]
+	var local_points = PoolVector2Array()
+	for point in polygon:
+		local_points.append(point - origin)
+	if closed:
+		local_points.append(Vector2.ZERO) # Preserve the explicit seam without copying the input.
+	var path_data = {
+		"position": var2str(origin),
+		"rotation": 0.0,
+		"scale": var2str(Vector2.ONE),
+		"edit_points": var2str(local_points),
+		"texture": path_texture.resource_path,
+		"width": path_texture.get_height() * settings.active_width,
+		"smoothness": settings.active_smoothness,
+		"layer": settings.active_layer,
+		"fade_in": settings.active_fade_in,
+		"fade_out": settings.active_fade_out,
+		"grow": settings.active_grow,
+		"shrink": settings.active_shrink,
+		"block_light": settings.active_block_light,
+		"loop": false,
+	}
+	var path_index = 0 if settings.active_sorting == 1 else -1
+	var loaded_path = BuildingPlannerUtils.load_path(_parent_mod.Global, pathways, path_data, settings.active_color, path_index)
+	if not loaded_path and LOGGER:
+		LOGGER.error("%s: LoadPathway() returned null!" % CLASS_NAME)
+	return loaded_path

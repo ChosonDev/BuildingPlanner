@@ -12,6 +12,7 @@ const CLASS_NAME = "BuildingPlannerTool"
 
 var LOGGER = null
 var _gl_api = null  # GuidesLinesApi instance
+var _api_source = null
 
 # ============================================================================
 # CACHED REFERENCES (updated every frame by BuildingPlanner.gd)
@@ -20,7 +21,6 @@ var _gl_api = null  # GuidesLinesApi instance
 var parent_mod = null
 var cached_world = null
 var cached_worldui = null
-var cached_camera = null
 var cached_snappy_mod = null   # Lievven.Snappy_Mod reference (or null)
 
 # ============================================================================
@@ -37,14 +37,12 @@ var _roof_builder = null   # RoofBuilder
 # STATE
 # ============================================================================
 
-enum Mode { NONE, PATTERN_FILL, WALL_BUILDER, PATH_BUILDER, ROOM_BUILDER, ROOF_BUILDER }
+enum Mode { PATTERN_FILL = 1, WALL_BUILDER, PATH_BUILDER, ROOM_BUILDER, ROOF_BUILDER }
 
 var _active_mode: int = Mode.PATTERN_FILL  # Default to first mode
 var is_enabled: bool = false
 
-# Snapshot of GuidesLines tool state captured on Enable().
-# Refreshed once per activation cycle — both tools cannot be active simultaneously,
-# so the state cannot change while BuildingPlanner is the active tool.
+# Public GuidesLines state refreshed on activation, Room preview and Room clicks.
 var gl_tool_state: Dictionary = {}
 
 # ============================================================================
@@ -52,6 +50,7 @@ var gl_tool_state: Dictionary = {}
 # ============================================================================
 
 var _overlay = null   # BuildingPlannerOverlay Node2D instance
+var _overlay_class = null
 
 # ============================================================================
 # UI
@@ -79,53 +78,35 @@ func _connect_gl_api():
 	if not api:
 		if LOGGER: LOGGER.error("%s: Global.API not available." % CLASS_NAME)
 		return
+	_api_source = api
 	if api.has("GuidesLinesApi"):
 		_gl_api = api.GuidesLinesApi
 		_init_features()
 	else:
-		api.connect("api_registered", self, "_on_api_registered")
+		if not api.is_connected("api_registered", self, "_on_api_registered"):
+			api.connect("api_registered", self, "_on_api_registered")
 
 func _on_api_registered(api_id, _api):
-	if api_id == "GuidesLinesApi":
+	if api_id == "GuidesLinesApi" and not _gl_api:
 		_gl_api = parent_mod.Global.API.GuidesLinesApi
 		_init_features()
+		if is_enabled:
+			Enable()
 		if LOGGER:
 			LOGGER.info("%s: GuidesLinesApi connected." % CLASS_NAME)
 
 # Load and instantiate feature modules.
 # Called once when GuidesLinesApi becomes available.
 func _init_features():
-	var root = parent_mod.Global.Root
-	var PatternFillClass = ResourceLoader.load(root + "scripts/features/PatternFill.gd",  "GDScript", false)
-	var WallBuilderClass = ResourceLoader.load(root + "scripts/features/WallBuilder.gd",  "GDScript", false)
-	var PathBuilderClass = ResourceLoader.load(root + "scripts/features/PathBuilder.gd",  "GDScript", false)
-	var RoomBuilderClass = ResourceLoader.load(root + "scripts/features/RoomBuilder.gd",  "GDScript", false)
-	var RoofBuilderClass = ResourceLoader.load(root + "scripts/features/RoofBuilder.gd",  "GDScript", false)
-
-	if PatternFillClass:
-		_pattern_fill = PatternFillClass.new(_gl_api, LOGGER, parent_mod)
-	elif LOGGER:
-		LOGGER.warn("%s: Failed to load PatternFill.gd" % CLASS_NAME)
-
-	if WallBuilderClass:
-		_wall_builder = WallBuilderClass.new(_gl_api, LOGGER, parent_mod)
-	elif LOGGER:
-		LOGGER.warn("%s: Failed to load WallBuilder.gd" % CLASS_NAME)
-
-	if PathBuilderClass:
-		_path_builder = PathBuilderClass.new(_gl_api, LOGGER, parent_mod)
-	elif LOGGER:
-		LOGGER.warn("%s: Failed to load PathBuilder.gd" % CLASS_NAME)
-
-	if RoomBuilderClass:
-		_room_builder = RoomBuilderClass.new(_gl_api, LOGGER, parent_mod)
-	elif LOGGER:
-		LOGGER.warn("%s: Failed to load RoomBuilder.gd" % CLASS_NAME)
-
-	if RoofBuilderClass:
-		_roof_builder = RoofBuilderClass.new(_gl_api, LOGGER, parent_mod)
-	elif LOGGER:
-		LOGGER.warn("%s: Failed to load RoofBuilder.gd" % CLASS_NAME)
+	for entry in [["PatternFill", "_pattern_fill"], ["WallBuilder", "_wall_builder"], ["PathBuilder", "_path_builder"], ["RoomBuilder", "_room_builder"], ["RoofBuilder", "_roof_builder"]]:
+		var script = ResourceLoader.load(parent_mod.Global.Root + "scripts/features/" + entry[0] + ".gd", "GDScript", false)
+		if script:
+			set(entry[1], script.new(_gl_api, LOGGER, parent_mod))
+		elif LOGGER:
+			LOGGER.warn("%s: Failed to load %s.gd" % [CLASS_NAME, entry[0]])
+	if _ui:
+		_ui.release_all_grid_menus()
+		_ui.bind_features()
 
 	if LOGGER:
 		LOGGER.info("%s: features initialised." % CLASS_NAME)
@@ -137,27 +118,24 @@ func _init_features():
 # Called when this tool becomes active in the Dungeondraft toolset.
 func Enable():
 	is_enabled = true
-	# Capture GuidesLines state once — it cannot change while we are the active tool
-	if _gl_api:
+	# Refresh again during Room mode: GuidesLines may change through its public API.
+	if _gl_api and _gl_api.has_method("get_tool_state"):
 		gl_tool_state = _gl_api.get_tool_state()
-	# Lazily build all texture grid menus now that the Editor is definitely ready
-	if _ui and _ui.has_method("try_build_all_grid_menus"):
-		_ui.try_build_all_grid_menus()
-	# Restore the active mode from the UI selector (was reset to NONE on Disable)
-	if _ui and _ui._mode_selector:
-		var mode = _ui._mode_selector.get_item_id(_ui._mode_selector.selected)
-		_set_mode(mode)
 	else:
-		_set_mode(Mode.PATTERN_FILL)
+		gl_tool_state = {}
+	# Restore the active mode from the UI selector.
+	_set_mode(_ui.get_selected_mode() if _ui else Mode.PATTERN_FILL)
+	if _ui:
+		_ui.try_build_grid_menus(_active_mode)
 
 # Called when the user switches away from this tool.
 func Disable():
 	is_enabled = false
+	if _ui:
+		_ui.release_search_focus()
 	# Do NOT reset _active_mode here — the overlay already guards on is_enabled,
 	# and we need the mode to survive Disable/Enable cycles (e.g. SelectTool round-trip).
-	# Return all borrowed texture grid menus before we disappear
-	if _ui and _ui.has_method("release_all_grid_menus"):
-		_ui.release_all_grid_menus()
+	# Keep our own grids and selections across tool switches.
 	# Clear Room Builder preview — registry is intentionally kept alive so
 	# Merge mode can still clean up stale fills/walls after a tool switch.
 	if _room_builder:
@@ -166,37 +144,91 @@ func Disable():
 
 # Called every frame while the mod is loaded (from BuildingPlanner.gd).
 func Update(_delta):
-	# Create the input overlay once WorldUI is available (even before Enable)
-	if not _overlay and cached_worldui:
+	if not is_enabled:
+		return
+	if _ui:
+		_ui.update_active_mode(_active_mode, parent_mod.Global)
+	if is_instance_valid(_overlay) and _overlay.get_parent() != cached_worldui:
+		_destroy_overlay()
+	if not is_instance_valid(_overlay) and is_instance_valid(cached_worldui):
 		_create_overlay()
 
 	# Drive Room Builder preview every frame while active
-	if is_enabled and _active_mode == Mode.ROOM_BUILDER and _room_builder and cached_worldui:
-		# Match GuidesLines MarkerOverlay logic: IsInsideBounds alone is not enough —
-		# viewport x < 450 means the cursor is over the left tool panel (UI area).
-		var vp_mouse: Vector2 = cached_worldui.get_viewport().get_mouse_position()
-		var cursor_in_ui: bool = not cached_worldui.IsInsideBounds or vp_mouse.x < 450
-		_room_builder.update_preview(cached_worldui.MousePosition, cursor_in_ui, gl_tool_state)
+	if _active_mode == Mode.ROOM_BUILDER and _room_builder and cached_worldui:
+		if not is_mouse_on_canvas():
+			_room_builder.stop_preview()
+			return
+		_refresh_shape_state()
+		_room_builder.update_preview(room_position(cached_worldui.MousePosition), gl_tool_state)
+
+func _refresh_shape_state() -> void:
+	if _gl_api and _gl_api.has_method("get_shape_state"):
+		gl_tool_state = _gl_api.get_shape_state()
+	elif _gl_api and _gl_api.has_method("get_tool_state"):
+		gl_tool_state = _gl_api.get_tool_state()
+	else:
+		gl_tool_state = {}
+
+func set_world_references(world, worldui):
+	if cached_world != world or cached_worldui != worldui:
+		Disable()
+		gl_tool_state.clear()
+		if _room_builder:
+			_room_builder.on_map_changed()
+		if _ui:
+			_ui.release_all_grid_menus()
+	cached_world = world
+	cached_worldui = worldui
+
+func shutdown():
+	Disable()
+	if _ui:
+		_ui.shutdown()
+		_ui = null
+	if is_instance_valid(_api_source) and _api_source.is_connected("api_registered", self, "_on_api_registered"):
+		_api_source.disconnect("api_registered", self, "_on_api_registered")
+	_api_source = null
+	if _room_builder:
+		_room_builder.on_map_changed()
+	parent_mod = null
+
+func is_mouse_on_canvas() -> bool:
+	if not is_instance_valid(cached_worldui) or not cached_worldui.IsInsideBounds:
+		return false
+	var viewport = cached_worldui.get_viewport()
+	return is_canvas_position(viewport.get_mouse_position(), viewport.size)
+
+static func is_canvas_position(mouse: Vector2, viewport_size: Vector2) -> bool:
+	return mouse.x >= 450 and mouse.y >= 100 and mouse.y <= viewport_size.y - 100
+
+func room_position(position: Vector2) -> Vector2:
+	if parent_mod.Global.Editor.IsSnapping:
+		return snap_position_to_grid(position)
+	return position
 
 # ============================================================================
 # OVERLAY
 # ============================================================================
 
 func _create_overlay():
-	var root = parent_mod.Global.Root
-	var OverlayClass = ResourceLoader.load(
-		root + "scripts/overlay/BuildingPlannerOverlay.gd", "GDScript", false)
-	if not OverlayClass:
+	if not _overlay_class:
+		_overlay_class = ResourceLoader.load(
+			parent_mod.Global.Root + "scripts/overlay/BuildingPlannerOverlay.gd", "GDScript", false)
+	if not _overlay_class:
 		if LOGGER: LOGGER.warn("%s: failed to load BuildingPlannerOverlay.gd" % CLASS_NAME)
 		return
-	_overlay = OverlayClass.new()
+	_overlay = _overlay_class.new()
 	_overlay.tool = self
 	cached_worldui.add_child(_overlay)
 
 func _destroy_overlay():
-	if _overlay:
+	if is_instance_valid(_overlay):
+		_overlay.tool = null
+		var owner = _overlay.get_parent()
+		if owner:
+			owner.remove_child(_overlay)
 		_overlay.queue_free()
-		_overlay = null
+	_overlay = null
 
 # ============================================================================
 # UI PANEL
@@ -231,40 +263,31 @@ func _set_mode(mode: int):
 # EXECUTE ACTIONS (called from UI)
 # ============================================================================
 
-## Called by BuildingPlannerOverlay when the user left-clicks in Pattern Fill mode.
-func handle_pattern_fill_click(world_pos: Vector2) -> void:
-	if not _pattern_fill:
-		if LOGGER: LOGGER.error("%s: PatternFill module not loaded." % CLASS_NAME)
-		return
-	_pattern_fill.fill_at(world_pos)
-
-## Called by BuildingPlannerOverlay when the user left-clicks in Wall Builder mode.
-func handle_wall_builder_click(world_pos: Vector2) -> void:
-	if not _wall_builder:
-		if LOGGER: LOGGER.error("%s: WallBuilder module not loaded." % CLASS_NAME)
-		return
-	_wall_builder.build_at(world_pos)
-
-## Called by BuildingPlannerOverlay when the user left-clicks in Path Builder mode.
-func handle_path_builder_click(world_pos: Vector2) -> void:
-	if not _path_builder:
-		if LOGGER: LOGGER.error("%s: PathBuilder module not loaded." % CLASS_NAME)
-		return
-	_path_builder.build_at(world_pos)
-
-## Called by BuildingPlannerOverlay when the user left-clicks in Room Builder mode.
-func handle_room_builder_click(world_pos: Vector2) -> void:
-	if not _room_builder:
-		if LOGGER: LOGGER.error("%s: RoomBuilder module not loaded." % CLASS_NAME)
-		return
-	_room_builder.build_room_at(world_pos, gl_tool_state)
-
-## Called by BuildingPlannerOverlay when the user left-clicks in Roof Builder mode.
-func handle_roof_builder_click(world_pos: Vector2) -> void:
-	if not _roof_builder:
-		if LOGGER: LOGGER.error("%s: RoofBuilder module not loaded." % CLASS_NAME)
-		return
-	_roof_builder.build_at(world_pos)
+## Dispatch canvas actions here so the overlay only owns input guards.
+## Return whether a loaded mode accepted the click, independently of build success.
+func handle_canvas_click(world_pos: Vector2) -> bool:
+	var feature = null
+	match _active_mode:
+		Mode.PATTERN_FILL:
+			feature = _pattern_fill
+		Mode.WALL_BUILDER:
+			feature = _wall_builder
+		Mode.PATH_BUILDER:
+			feature = _path_builder
+		Mode.ROOM_BUILDER:
+			if not _room_builder:
+				return false
+			_refresh_shape_state()
+			_room_builder.build_room_at(room_position(world_pos), gl_tool_state)
+			return true
+		Mode.ROOF_BUILDER:
+			if _ui:
+				_ui.sync_roof_settings(parent_mod.Global)
+			feature = _roof_builder
+	if not feature:
+		return false
+	feature.build_at(world_pos)
+	return true
 
 ## Called by BuildingPlannerOverlay on scroll wheel while in Room Builder mode.
 ## [direction]: +1 = wheel up, -1 = wheel down.
@@ -276,6 +299,8 @@ func handle_room_scroll(direction: int, alt_held: bool) -> void:
 		_room_builder.adjust_scale(direction * _room_builder.SCALE_STEP)
 	else:
 		_room_builder.adjust_angle(direction * _room_builder.ANGLE_STEP)
+	if _ui:
+		_ui.update_room_overrides()
 
 # ============================================================================
 # SNAP

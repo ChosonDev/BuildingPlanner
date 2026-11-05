@@ -8,6 +8,9 @@
 #   - scripts/tool/BuildingPlannerHistory.gd: Undo/redo history record classes
 #   - scripts/features/PatternFill.gd: Feature — fill Shape marker area with pattern
 #   - scripts/features/WallBuilder.gd: Feature — place walls along marker outline
+#   - scripts/features/PathBuilder.gd: Feature — closed paths along marker outlines
+#   - scripts/features/RoomBuilder.gd: Feature — rooms and boolean rebuilds
+#   - scripts/features/RoofBuilder.gd: Feature — roofs over marker regions
 #   - scripts/utils/BuildingPlannerUtils.gd: Shared geometry and helper functions
 
 var script_class = "tool"
@@ -97,8 +100,10 @@ func start():
 func update(_delta):
 	# Create tool once when Editor and Toolset are both ready
 	if not _tool_created and Global.Editor != null and Global.Editor.Toolset != null:
-		_create_tool()
-		_tool_created = true
+		_tool_created = _create_tool()
+
+	if _tool:
+		_tool.set_world_references(Global.World, Global.WorldUI)
 
 	# Require a loaded map before doing anything else
 	if Global.World == null or Global.WorldUI == null:
@@ -121,14 +126,10 @@ func update(_delta):
 			if not _cached_snappy_mod and LOGGER:
 				LOGGER.debug("%s: Snappy Mod not found, using vanilla grid snapping" % CLASS_NAME)
 		_snappy_mod_checked = true
+		if _tool:
+			_tool.cached_snappy_mod = _cached_snappy_mod
 
 	if _tool:
-		# Refresh cached world references every frame
-		_tool.cached_world = Global.World
-		_tool.cached_worldui = Global.WorldUI
-		_tool.cached_camera = Global.Camera
-		_tool.cached_snappy_mod = _cached_snappy_mod
-
 		# Drive Enable/Disable based on the active tool name
 		var is_active = Global.Editor.ActiveToolName == "BuildingPlannerTool"
 		if is_active and not _tool.is_enabled:
@@ -141,16 +142,19 @@ func update(_delta):
 func unload():
 	if LOGGER:
 		LOGGER.info("%s: unloading." % CLASS_NAME)
+	if _tool:
+		_tool.shutdown()
 	_tool = null
+	_tool_created = false
 
 # ============================================================================
 # TOOL CREATION
 # ============================================================================
 
-func _create_tool():
+func _create_tool() -> bool:
 	if not BuildingPlannerToolClass:
 		if LOGGER: LOGGER.error("Cannot create tool — BuildingPlannerToolClass not loaded")
-		return
+		return false
 
 	_tool = BuildingPlannerToolClass.new(self)
 
@@ -161,11 +165,6 @@ func _create_tool():
 
 	# Connect GuidesLinesApi and load feature modules now that LOGGER is ready.
 	_tool.setup()
-
-	# Cache world references at creation time
-	_tool.cached_world = Global.World
-	_tool.cached_worldui = Global.WorldUI
-	_tool.cached_camera = Global.Camera
 
 	var icon_path = self.Global.Root + TOOL_ICON_PATH
 
@@ -180,9 +179,13 @@ func _create_tool():
 	if tool_panel == null:
 		if LOGGER: LOGGER.error("Failed to create tool panel!")
 		else: print("BuildingPlanner: ERROR - Failed to create tool panel!")
-		return
+		_tool.shutdown()
+		_tool = null
+		return false
 
+	_tool.cached_snappy_mod = _cached_snappy_mod
 	_tool.tool_panel = tool_panel
 	_tool.create_ui_panel()
 
 	if LOGGER: LOGGER.info("BuildingPlanner tool created successfully")
+	return true

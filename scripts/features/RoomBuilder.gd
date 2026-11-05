@@ -4,18 +4,20 @@ extends Reference
 # RoomBuilder: one-click room creation.
 #
 # Workflow on left-click:
-#   1. Place a temporary Shape marker at click position using GuidesLines state.
-#   2. Fill the marker area with the selected pattern (via compute_fill_polygon).
-#   3. Build a closed wall along the marker outline (via compute_fill_polygon).
-#   4. Delete the temporary marker via the API.
-#   5. Record a combined undo/redo history entry.
+#   1. Capture GuidesLines history for the selected placement/boolean operation.
+#   2. Snapshot old registered objects before replacing any geometry.
+#   3. Fill each resulting polygon and build its Wall or Path outline.
+#   4. Keep persistent markers, or delete the temporary Single marker.
+#   5. Record marker edits and native objects as one undo/redo entry.
 #
 # While active, set_shape_preview() is called every frame to render a live
 # preview polygon that mirrors the current GuidesLines Shape parameters.
-# The gl_tool_state snapshot is captured once in BuildingPlannerTool.Enable()
-# and passed in — both tools cannot be active simultaneously.
+# BuildingPlannerTool refreshes the public GuidesLines state during preview and placement.
 
 const CLASS_NAME = "RoomBuilder"
+const PatternFill = preload("PatternFill.gd")
+const WallBuilder = preload("WallBuilder.gd")
+const PathBuilder = preload("PathBuilder.gd")
 const BuildingPlannerHistory   = preload("../tool/BuildingPlannerHistory.gd")
 const MarkerObjectRegistry     = preload("MarkerObjectRegistry.gd")
 const BuildingPlannerUtils     = preload("../utils/BuildingPlannerUtils.gd")
@@ -28,47 +30,22 @@ var _gl_api     = null
 var LOGGER      = null
 var _parent_mod = null
 var _registry   = null   # MarkerObjectRegistry
+var _operation = null   # Active synchronous RoomBuilderRecord
+var _difference_noop = false
+var _preview_active = false
+var _shape_parameters = [0.0, 0.0, 0]
+var _supported_modes = []
+var _supports_preview = false
+const SUB_MODE_METHODS = ["place_shape_marker_plain", "place_shape_merge", "place_shape_conforming", "place_shape_wrapping", "apply_shape_difference"]
+const REQUIRED_API_METHODS = ["delete_marker", "is_ready", "begin_history_capture", "end_history_capture"]
 
-# ============================================================================
-# PATTERN SETTINGS
-# ============================================================================
-
-var active_texture   = null           # Texture
-var active_color:    Color = Color.white
-var active_rotation: float = 0.0      # degrees
-var active_layer:    int   = 100       # pattern layer z_index — 100 = User Layer 1
-var active_outline:  bool  = false
-
-# ============================================================================
-# OUTLINE MODE
-# ============================================================================
+# Independent room settings use the same feature implementations as standalone tools.
+var _pattern_fill = null
+var _wall_builder = null
+var _path_builder = null
 
 enum OutlineMode { WALL = 0, PATH = 1 }
-
 var active_outline_mode: int = OutlineMode.WALL
-
-# ============================================================================
-# WALL SETTINGS  (used when active_outline_mode == OutlineMode.WALL)
-# ============================================================================
-
-var active_shadow: bool = true
-var active_joint:  int  = 1           # 0 = Sharp, 1 = Bevel, 2 = Round
-var active_wall_color: Color = Color.white
-
-# ============================================================================
-# PATH SETTINGS  (used when active_outline_mode == OutlineMode.PATH)
-# ============================================================================
-
-var active_path_color:       Color = Color.white
-var active_path_width:       float = 1.0
-var active_path_smoothness:  float = 0.0
-var active_path_layer:       int   = 100  # path layer z_index — 100 = User Layer 1
-var active_path_sorting:     int   = 0   # 0 = Over, 1 = Under
-var active_path_fade_in:     bool  = false
-var active_path_fade_out:    bool  = false
-var active_path_grow:        bool  = false
-var active_path_shrink:      bool  = false
-var active_path_block_light: bool  = false
 
 # ============================================================================
 # SHAPE OVERRIDES (scroll wheel adjustments while Room Builder mode is active)
@@ -85,7 +62,7 @@ const SCALE_MIN: float  = 0.1    # minimum scale factor
 
 ## Rotate the preview / next placement by [delta_deg] degrees.
 func adjust_angle(delta_deg: float) -> void:
-	shape_angle_offset = fmod(shape_angle_offset + delta_deg, 360.0)
+	shape_angle_offset = fposmod(shape_angle_offset + delta_deg, 360.0)
 
 ## Scale the preview / next placement by [delta] (positive = larger, negative = smaller).
 func adjust_scale(delta: float) -> void:
@@ -100,6 +77,20 @@ func _init(gl_api, logger, parent_mod = null):
 	LOGGER      = logger
 	_parent_mod = parent_mod
 	_registry   = MarkerObjectRegistry.new(logger)
+	var supported = gl_api != null
+	for method in REQUIRED_API_METHODS:
+		if not gl_api or not gl_api.has_method(method):
+			supported = false
+	for method in SUB_MODE_METHODS:
+		_supported_modes.append(supported and gl_api.has_method(method))
+	# Merge may place a new marker when no shapes overlap.
+	for mode in [0, 1]:
+		_supported_modes[mode] = _supported_modes[mode] and gl_api.has_method("get_shape_polygon")
+	_supported_modes[1] = _supported_modes[1] and _supported_modes[0]
+	_supports_preview = gl_api != null and gl_api.has_method("set_shape_preview") and gl_api.has_method("clear_shape_preview")
+	_pattern_fill = PatternFill.new(gl_api, logger, parent_mod)
+	_wall_builder = WallBuilder.new(gl_api, logger, parent_mod)
+	_path_builder = PathBuilder.new(gl_api, logger, parent_mod)
 
 # ============================================================================
 # SUB-MODE
@@ -117,38 +108,31 @@ var active_sub_mode: int = SubMode.SINGLE
 ##
 ## Parameters:
 ##   world_pos    - MousePosition from WorldUI (world-space Vector2)
-##   cursor_in_ui - true when the cursor is over the UI panel
 ##   state        - pre-fetched Dictionary from GuidesLinesApi.get_tool_state()
-func update_preview(world_pos: Vector2, cursor_in_ui: bool, state: Dictionary) -> void:
+func update_preview(world_pos: Vector2, state: Dictionary) -> void:
 	if not _gl_api:
 		return
 
-	if cursor_in_ui:
-		_gl_api.clear_shape_preview()
-		return
-
-	if not state.get("ready", false):
-		return
-
-	if state.get("active_marker_type", "") != "Shape":
-		_gl_api.clear_shape_preview()
+	var args = _shape_args(state)
+	if not _supports_preview or not _can_build(world_pos, state, args):
+		stop_preview()
 		return
 
 	_gl_api.set_shape_preview(
 		world_pos,
-		state.get("active_shape_radius", 1.0) * shape_scale_factor,
-		state.get("active_shape_angle",  0.0) + shape_angle_offset,
-		state.get("active_shape_sides",  6),
+		args[0], args[1], args[2],
 		state.get("active_color",        null)
 	)
+	_preview_active = true
 
 ## Clears the preview immediately — call on mode switch or tool deactivation.
 func stop_preview() -> void:
-	if _gl_api:
+	if _gl_api and _preview_active:
 		_gl_api.clear_shape_preview()
+	_preview_active = false
 
-## Called when the tool is deactivated — purges the registry without touching the scene.
-func on_disabled() -> void:
+## Map-scoped associations must survive tool switches but never map changes.
+func on_map_changed() -> void:
 	_registry.clear()
 
 # ============================================================================
@@ -159,668 +143,203 @@ func on_disabled() -> void:
 ## [state] is the gl_tool_state snapshot from BuildingPlannerTool.
 ## Returns true on success.
 func build_room_at(coords: Vector2, state: Dictionary) -> bool:
+	# Snapshot click arguments; API signal callbacks may refresh the preview.
+	var args = _shape_args(state).duplicate()
+	if not _can_build(coords, state, args):
+		if LOGGER: LOGGER.error("RoomBuilder: placement cancelled; invalid shape settings, unsupported mode or GuidesLinesApi not ready.")
+		return false
+	if not BuildingPlannerUtils.resolve_level(_parent_mod):
+		if LOGGER: LOGGER.error("RoomBuilder: World/Level not loaded.")
+		return false
+	if not _gl_api.begin_history_capture():
+		if LOGGER: LOGGER.error("RoomBuilder: GuidesLinesApi rejected begin_history_capture; room placement cancelled.")
+		return false
+	_operation = BuildingPlannerHistory.RoomBuilderRecord.new(_parent_mod, _registry)
+	_difference_noop = false
+	var success = _build_room(coords, args, state.get("active_color", null))
+	var marker_records = _gl_api.end_history_capture()
+	if success and (_difference_noop or active_sub_mode == SubMode.SINGLE):
+		marker_records = [] # Successful Single and non-overlapping Difference leave markers unchanged.
+	if LOGGER: LOGGER.debug("RoomBuilder: capturing native object history (mode=%d, success=%s)." % [active_sub_mode, str(success)])
+	_operation.finish(marker_records)
+	if LOGGER: LOGGER.debug("RoomBuilder: native object history captured.")
+	if not success:
+		_operation.undo()
+	elif _operation.has_changes():
+		BuildingPlannerHistory.record_action(_parent_mod, LOGGER, _operation)
+		if LOGGER: LOGGER.debug("RoomBuilder: compound history recorded.")
+	_operation = null
+	return success
+
+func _shape_args(state: Dictionary) -> Array:
+	var radius = state.get("active_shape_radius")
+	var angle = state.get("active_shape_angle")
+	var sides = state.get("active_shape_sides")
+	if (typeof(radius) != TYPE_INT and typeof(radius) != TYPE_REAL) or (typeof(angle) != TYPE_INT and typeof(angle) != TYPE_REAL):
+		return []
+	if is_nan(radius) or is_inf(radius) or radius <= 0 or is_nan(angle) or is_inf(angle) or typeof(sides) != TYPE_INT or sides < 3:
+		return []
+	if is_nan(shape_scale_factor) or is_inf(shape_scale_factor) or shape_scale_factor <= 0 or is_nan(shape_angle_offset) or is_inf(shape_angle_offset):
+		return []
+	radius *= shape_scale_factor
+	angle += shape_angle_offset
+	if radius <= 0 or is_inf(radius) or is_inf(angle):
+		return []
+	_shape_parameters[0] = radius
+	_shape_parameters[1] = angle
+	_shape_parameters[2] = sides
+	return _shape_parameters
+
+func _can_build(coords: Vector2, state: Dictionary, args: Array) -> bool:
+	if args.empty() or not state.get("ready", false):
+		return false
+	if active_sub_mode < 0 or active_sub_mode >= _supported_modes.size() or not _supported_modes[active_sub_mode]:
+		return false
+	if active_outline_mode != OutlineMode.WALL and active_outline_mode != OutlineMode.PATH:
+		return false
+	return not (is_nan(coords.x) or is_nan(coords.y) or is_inf(coords.x) or is_inf(coords.y)) and _gl_api.is_ready()
+
+func _build_room(coords, args, color) -> bool:
+	if active_sub_mode == SubMode.SINGLE:
+		return _place_single(coords, args, color, false)
+	var result
 	match active_sub_mode:
-		SubMode.SINGLE:
-			return _build_room_single(coords, state)
 		SubMode.MERGE:
-			return _build_room_merge(coords, state)
+			result = _gl_api.place_shape_merge(coords, args[0], args[1], args[2])
 		SubMode.CONFORM:
-			return _build_room_conform(coords, state)
+			result = _gl_api.place_shape_conforming(coords, args[0], args[1], args[2], color)
 		SubMode.WRAP:
-			return _build_room_wrapping(coords, state)
+			result = _gl_api.place_shape_wrapping(coords, args[0], args[1], args[2], color)
 		SubMode.DIFFERENCE:
-			return _build_room_difference(coords, state)
-	return false
-
-# ============================================================================
-# PRIVATE — SUB-MODE IMPLEMENTATIONS
-# ============================================================================
-
-## Single mode: place temporary marker → fill → wall → delete marker.
-func _build_room_single(coords: Vector2, state: Dictionary) -> bool:
-	var result = _build_room_single_impl(coords, state, true)
-	return result
-
-## Single-no-delete: same as Single but the marker is kept (used as Merge fallback).
-func _build_room_single_no_delete(coords: Vector2, state: Dictionary) -> bool:
-	return _build_room_single_impl(coords, state, false)
-
-## Internal implementation for the Single logic.
-## [delete_marker_after] — when false the temporary marker is kept.
-func _build_room_single_impl(coords: Vector2, state: Dictionary,
-		delete_marker_after: bool) -> bool:
-	if not _gl_api:
-		if LOGGER: LOGGER.error("%s: GuidesLinesApi not available." % CLASS_NAME)
+			result = _gl_api.apply_shape_difference(coords, args[0], args[1], args[2])
+	if typeof(result) != TYPE_DICTIONARY or result.empty():
+		if LOGGER: LOGGER.error("RoomBuilder: Invalid boolean operation result from GuidesLinesApi.")
 		return false
-
-	if not _parent_mod:
-		if LOGGER: LOGGER.error("%s: parent_mod not set." % CLASS_NAME)
+	var affected = result.get("affected_markers", [])
+	var absorbed = result.get("absorbed_marker_ids", [])
+	if typeof(affected) != TYPE_ARRAY or typeof(absorbed) != TYPE_ARRAY:
+		if LOGGER: LOGGER.error("RoomBuilder: Invalid affected_markers or absorbed_marker_ids from GuidesLinesApi.")
 		return false
-
-	if not _gl_api.has_method("compute_fill_polygon"):
-		if LOGGER: LOGGER.error(
-			"%s: compute_fill_polygon not found — update GuidesLines to v2.2.0+." % CLASS_NAME)
-		return false
-
-	if _gl_api.has_method("is_ready") and not _gl_api.is_ready():
-		if LOGGER: LOGGER.warn("%s: GuidesLinesApi not ready yet." % CLASS_NAME)
-		return false
-
-	if not state.get("ready", false) or state.get("active_marker_type", "") != "Shape":
-		if LOGGER: LOGGER.warn("%s: GuidesLines is not in Shape mode." % CLASS_NAME)
-		return false
-
-	# ---- 1. Place temporary Shape marker ----
-	var marker_id: int = _gl_api.place_shape_marker(
-		coords,
-		state.get("active_shape_radius", 1.0) * shape_scale_factor,
-		state.get("active_shape_angle",  0.0) + shape_angle_offset,
-		state.get("active_shape_sides",  6),
-		state.get("active_color",        null)
-	)
-	if marker_id < 0:
-		if LOGGER: LOGGER.error("%s: place_shape_marker failed." % CLASS_NAME)
-		return false
-
-	# ---- 2. Resolve polygon ----
-	var fill_result = _gl_api.compute_fill_polygon(coords)
-	if typeof(fill_result) != TYPE_DICTIONARY or fill_result.get("polygon", []).empty():
-		if LOGGER: LOGGER.warn("%s: compute_fill_polygon returned empty polygon." % CLASS_NAME)
-		if delete_marker_after:
-			_gl_api.delete_marker(marker_id)
-		return false
-
-	var polygon: Array = _sanitize_polygon(fill_result["polygon"])
-	if polygon.empty():
-		if LOGGER: LOGGER.warn("%s: polygon is degenerate after sanitize." % CLASS_NAME)
-		if delete_marker_after:
-			_gl_api.delete_marker(marker_id)
-		return false
-
-	# ---- 3. Fill with pattern ----
-	var new_shapes: Array = _fill_pattern(polygon)
-
-	# ---- 4. Build outline (wall or path) ----
-	var new_wall = null
-	if active_outline_mode == OutlineMode.WALL:
-		new_wall = _build_wall(polygon)
-	elif active_outline_mode == OutlineMode.PATH:
-		_build_path(polygon)
-
-	# ---- 5. Register objects when keeping the marker (potential future merge target) ----
-	if not delete_marker_after:
-		_registry.register(marker_id, new_shapes,
-			[new_wall] if new_wall != null else [])
-
-	# ---- 6. Optionally delete temporary marker ----
-	if delete_marker_after:
-		_gl_api.delete_marker(marker_id)
-
-	# ---- 7. Record history (patterns only; wall undo not supported) ----
-	if not new_shapes.empty():
-		_record_history(BuildingPlannerHistory.PatternFillRecord.new(
-			_parent_mod, LOGGER, new_shapes))
-
-	if LOGGER: LOGGER.info("%s: room built at %s with %d polygon points." % [
-		CLASS_NAME, str(coords), polygon.size()])
-	return true
-
-## Merge mode: call place_shape_merge and fill/wall every affected marker.
-## Falls back to Single-no-delete when there are no overlapping markers.
-func _build_room_merge(coords: Vector2, state: Dictionary) -> bool:
-	if not _gl_api:
-		if LOGGER: LOGGER.error("%s: GuidesLinesApi not available." % CLASS_NAME)
-		return false
-
-	if not _parent_mod:
-		if LOGGER: LOGGER.error("%s: parent_mod not set." % CLASS_NAME)
-		return false
-
-	if not _gl_api.has_method("place_shape_merge"):
-		if LOGGER: LOGGER.error(
-			"%s: place_shape_merge not found — update GuidesLines." % CLASS_NAME)
-		return false
-
-	if _gl_api.has_method("is_ready") and not _gl_api.is_ready():
-		if LOGGER: LOGGER.warn("%s: GuidesLinesApi not ready yet." % CLASS_NAME)
-		return false
-
-	if not state.get("ready", false) or state.get("active_marker_type", "") != "Shape":
-		if LOGGER: LOGGER.warn("%s: GuidesLines is not in Shape mode." % CLASS_NAME)
-		return false
-
-	# ---- 1. Attempt merge ----
-	var merge_result: Dictionary = _gl_api.place_shape_merge(
-		coords,
-		state.get("active_shape_radius", 1.0) * shape_scale_factor,
-		state.get("active_shape_angle",  0.0) + shape_angle_offset,
-		state.get("active_shape_sides",  6)
-	)
-
-	if merge_result.empty():
-		if LOGGER: LOGGER.error("%s: place_shape_merge returned internal failure." % CLASS_NAME)
-		return false
-
-	var affected: Array = merge_result.get("affected_markers", [])
-
-	# ---- 2. Fallback — no overlapping markers: run Single without deleting ----
-	if affected.empty():
-		if LOGGER: LOGGER.info(
-			"%s: Merge found no overlapping markers — falling back to Single (keep marker)." % CLASS_NAME)
-		return _build_room_single_no_delete(coords, state)
-
-	# ---- 3. Clean up absorbed markers (deleted during merge) ----
-	var absorbed_ids: Array = merge_result.get("absorbed_marker_ids", [])
-	for absorbed_id in absorbed_ids:
-		_registry.cleanup(absorbed_id)
-
-	# ---- 4. Fill + Wall for every merged marker ----
-	# Use compute_fill_polygon at the updated marker position instead of the raw
-	# new_polygon vertices — this ensures the same world-space format that
-	# DrawPolygon / AddWall expect (identical to Single mode).
-	var all_new_shapes: Array = []
+	# Existing rooms must retain their ownership and style; never repaint from live UI.
+	var touched_ids = absorbed.duplicate()
+	if active_sub_mode != SubMode.WRAP:
+		for entry in affected:
+			if typeof(entry) == TYPE_DICTIONARY:
+				touched_ids.append(entry.get("marker_id", -1))
+	for id in touched_ids:
+		if typeof(id) == TYPE_INT and _registry.has_entry(id) and (_registry.get_levels(id).empty() or _registry.get_settings(id).empty()):
+			if LOGGER: LOGGER.error("RoomBuilder: registered room %s is missing level or style metadata; placement cancelled." % str(id))
+			return false
+	_difference_noop = active_sub_mode == SubMode.DIFFERENCE and affected.empty()
+	# Capture every old node/index before removing any entry or inserting new geometry.
+	for id in absorbed:
+		if typeof(id) != TYPE_INT or id < 0:
+			if LOGGER: LOGGER.error("RoomBuilder: Invalid absorbed marker ID from GuidesLinesApi.")
+			return false
+		if _registry.has_entry(id):
+			_operation.remember(id)
 	for entry in affected:
-		var m_id: int = entry.get("marker_id", -1)
-		var fill_coords: Vector2 = entry.get("new_position", Vector2.ZERO)
-
-		# Remove stale fills and walls that belong to this marker
-		_registry.cleanup(m_id)
-
-		var fill_result = _gl_api.compute_fill_polygon(fill_coords)
-		var polygon: Array
-		if typeof(fill_result) == TYPE_DICTIONARY and not fill_result.get("polygon", []).empty():
-			polygon = fill_result["polygon"]
+		if typeof(entry) != TYPE_DICTIONARY or typeof(entry.get("marker_id")) != TYPE_INT or entry.marker_id < 0:
+			if LOGGER: LOGGER.error("RoomBuilder: Invalid affected marker ID from GuidesLinesApi.")
+			return false
+		if active_sub_mode != SubMode.WRAP and _registry.has_entry(entry.marker_id):
+			_operation.remember(entry.marker_id)
+	if active_sub_mode == SubMode.MERGE and affected.empty():
+		return _place_single(coords, args, color, true)
+	# Markers are map-wide: preserve geometry on every level that owned an affected room.
+	var levels_by_id = {}
+	var settings_by_id = {}
+	var merged_levels = [_parent_mod.Global.World.Level]
+	for entry in affected:
+		if active_sub_mode == SubMode.WRAP or not _registry.has_entry(entry.marker_id):
+			continue
+		var levels = _registry.get_levels(entry.marker_id)
+		if active_sub_mode == SubMode.MERGE:
+			for level in levels:
+				if not level in merged_levels:
+					merged_levels.append(level)
 		else:
-			polygon = entry.get("new_polygon", [])
-		polygon = _sanitize_polygon(polygon)
-		if polygon.empty():
-			if LOGGER: LOGGER.warn("%s: could not resolve polygon for merged marker %d (degenerate after sanitize)." % [
-				CLASS_NAME, m_id])
-			continue
-		var new_shapes: Array = _fill_pattern(polygon)
-		if not new_shapes.empty():
-			all_new_shapes += new_shapes
-		var new_wall = null
-		if active_outline_mode == OutlineMode.WALL:
-			new_wall = _build_wall(polygon)
-		elif active_outline_mode == OutlineMode.PATH:
-			_build_path(polygon)
-
-		# Register the freshly created objects for this marker
-		_registry.register(m_id, new_shapes,
-			[new_wall] if new_wall != null else [])
-
-	# ---- 5. Record history ----
-	if not all_new_shapes.empty():
-		_record_history(BuildingPlannerHistory.PatternFillRecord.new(
-			_parent_mod, LOGGER, all_new_shapes))
-
-	if LOGGER: LOGGER.info("%s: Merge built %d rooms at %s." % [
-		CLASS_NAME, affected.size(), str(coords)])
+			levels_by_id[entry.marker_id] = levels
+			settings_by_id[entry.marker_id] = _registry.get_settings(entry.marker_id)
+	if active_sub_mode == SubMode.MERGE:
+		for id in absorbed:
+			for level in _registry.get_levels(id):
+				if not level in merged_levels:
+					merged_levels.append(level)
+	for id in absorbed:
+		_registry.cleanup(id, _parent_mod.Global.World, _parent_mod.Global)
+	if active_sub_mode == SubMode.CONFORM or active_sub_mode == SubMode.WRAP:
+		var id = result.get("marker_id", -1)
+		var polygon = BuildingPlannerUtils.sanitize_polygon(result.get("marker_polygon", []))
+		if typeof(id) != TYPE_INT or id < 0 or polygon.empty():
+			if LOGGER: LOGGER.error("RoomBuilder: invalid new marker ID or polygon from GuidesLinesApi.")
+			return false
+		if not _populate_marker_geometry(id, polygon):
+			return false
+	# Wrap reports unchanged neighbors; rebuilding them would overwrite their settings.
+	if active_sub_mode != SubMode.WRAP:
+		for entry in affected:
+			var id = entry.get("marker_id", -1)
+			var raw_polygon = entry.get("new_polygon", [])
+			if typeof(raw_polygon) != TYPE_ARRAY and typeof(raw_polygon) != TYPE_VECTOR2_ARRAY:
+				if LOGGER: LOGGER.error("RoomBuilder: Invalid affected polygon type from GuidesLinesApi.")
+				return false
+			var polygon = BuildingPlannerUtils.sanitize_polygon(raw_polygon)
+			if not raw_polygon.empty() and polygon.empty():
+				if LOGGER: LOGGER.error("RoomBuilder: Invalid affected polygon geometry from GuidesLinesApi.")
+				return false
+			# Boolean cuts edit GuidesLines markers; only existing rooms own native objects.
+			if active_sub_mode != SubMode.MERGE and not _registry.has_entry(id):
+				continue
+			_registry.cleanup(id, _parent_mod.Global.World, _parent_mod.Global)
+			# An empty outline is the valid result of a fully consumed marker.
+			var levels = merged_levels if active_sub_mode == SubMode.MERGE else levels_by_id[id]
+			var settings = {} if active_sub_mode == SubMode.MERGE else settings_by_id[id]
+			if not polygon.empty() and not _populate_marker_geometry(id, polygon, true, levels, settings):
+				return false
 	return true
 
-## Conforming mode: the new marker is placed intact; every existing Shape marker
-## that overlaps is dented (Difference applied to existing markers only).
-## Falls back gracefully to Single-like behaviour when no markers overlap
-## (new marker is placed normally, affected_markers is empty).
-func _build_room_conform(coords: Vector2, state: Dictionary) -> bool:
-	if not _gl_api:
-		if LOGGER: LOGGER.error("%s: GuidesLinesApi not available." % CLASS_NAME)
+func _place_single(coords, args, color, keep_marker) -> bool:
+	var id = _gl_api.place_shape_marker_plain(coords, args[0], args[1], args[2], color)
+	if typeof(id) != TYPE_INT or id < 0:
+		if LOGGER: LOGGER.error("RoomBuilder: plain marker placement failed.")
 		return false
-
-	if not _parent_mod:
-		if LOGGER: LOGGER.error("%s: parent_mod not set." % CLASS_NAME)
+	var result = _gl_api.get_shape_polygon(id)
+	if typeof(result) != TYPE_DICTIONARY or result.get("marker_id") != id or result.get("marker_type") != "Shape":
+		if LOGGER: LOGGER.error("RoomBuilder: get_shape_polygon returned a mismatched marker ID or type.")
 		return false
-
-	if not _gl_api.has_method("place_shape_conforming"):
-		if LOGGER: LOGGER.error(
-			"%s: place_shape_conforming not found — update GuidesLines." % CLASS_NAME)
+	var polygon = BuildingPlannerUtils.sanitize_polygon(result.get("polygon", []))
+	if polygon.empty():
+		if LOGGER: LOGGER.error("RoomBuilder: get_shape_polygon returned invalid geometry.")
 		return false
-
-	if _gl_api.has_method("is_ready") and not _gl_api.is_ready():
-		if LOGGER: LOGGER.warn("%s: GuidesLinesApi not ready yet." % CLASS_NAME)
+	if not _populate_marker_geometry(id, polygon, keep_marker):
 		return false
+	return keep_marker or _gl_api.delete_marker(id)
 
-	if not state.get("ready", false) or state.get("active_marker_type", "") != "Shape":
-		if LOGGER: LOGGER.warn("%s: GuidesLines is not in Shape mode." % CLASS_NAME)
-		return false
-
-	# ---- 1. Place the new marker and dent all overlapping existing markers ----
-	var conform_result: Dictionary = _gl_api.place_shape_conforming(
-		coords,
-		state.get("active_shape_radius", 1.0) * shape_scale_factor,
-		state.get("active_shape_angle",  0.0) + shape_angle_offset,
-		state.get("active_shape_sides",  6),
-		state.get("active_color",        null)
-	)
-
-	var new_marker_id: int = conform_result.get("marker_id", -1)
-	if new_marker_id < 0:
-		if LOGGER: LOGGER.error("%s: place_shape_conforming returned failure." % CLASS_NAME)
-		return false
-
-	var all_new_shapes: Array = []
-
-	# ---- 2. Fill + outline for the newly placed (intact) marker ----
-	# Prefer compute_fill_polygon (same path as Single mode); fall back to marker_polygon.
-	var new_polygon: Array = []
-	var fill_result = _gl_api.compute_fill_polygon(coords)
-	if typeof(fill_result) == TYPE_DICTIONARY and not fill_result.get("polygon", []).empty():
-		new_polygon = fill_result["polygon"]
+func _populate_marker_geometry(id, polygon, keep_marker = true, levels: Array = [], settings: Dictionary = {}) -> bool:
+	if keep_marker:
+		_operation.remember(id)
+	if levels.empty():
+		levels = [_parent_mod.Global.World.Level]
+	if settings.empty():
+		var outline = _wall_builder if active_outline_mode == OutlineMode.WALL else _path_builder
+		settings = {"outline_mode": active_outline_mode, "fill": _pattern_fill.get_settings(), "outline": outline.get_settings()}
+	var shapes = []
+	var outlines = []
+	var success = true
+	for level in levels:
+		var fill = _pattern_fill._create_shape(polygon, level, settings.fill) if settings.fill.active_texture != null else null
+		var outline = _wall_builder._create_wall(polygon, level, true, settings.outline) if settings.outline_mode == OutlineMode.WALL else _path_builder._create_path(polygon, level, true, settings.outline)
+		if is_instance_valid(fill):
+			shapes.append(fill)
+		if is_instance_valid(outline):
+			outlines.append(outline)
+		else:
+			success = false
+		if settings.fill.active_texture != null and not is_instance_valid(fill):
+			success = false
+	if keep_marker:
+		_registry.register(id, shapes, outlines, levels, settings)
 	else:
-		new_polygon = conform_result.get("marker_polygon", [])
-	new_polygon = _sanitize_polygon(new_polygon)
-
-	var new_marker_shapes: Array = []
-	var new_marker_wall = null
-	if not new_polygon.empty():
-		new_marker_shapes = _fill_pattern(new_polygon)
-		if active_outline_mode == OutlineMode.WALL:
-			new_marker_wall = _build_wall(new_polygon)
-		elif active_outline_mode == OutlineMode.PATH:
-			_build_path(new_polygon)
-		if not new_marker_shapes.empty():
-			all_new_shapes += new_marker_shapes
-	else:
-		if LOGGER: LOGGER.warn("%s: new marker polygon is degenerate — skipping fill." % CLASS_NAME)
-
-	_registry.register(new_marker_id, new_marker_shapes,
-		[new_marker_wall] if new_marker_wall != null else [])
-
-	# ---- 3. Rebuild fill + outline for every dented existing marker ----
-	var affected: Array = conform_result.get("affected_markers", [])
-	for entry in affected:
-		var m_id: int = entry.get("marker_id", -1)
-		if m_id < 0:
-			continue
-
-		# Remove stale fills and walls owned by this marker before replacing them.
-		_registry.cleanup(m_id)
-
-		# Use the dented polygon reported by the API directly — the marker's outline
-		# no longer matches its original shape so compute_fill_polygon would be unreliable.
-		var dented_polygon: Array = _sanitize_polygon(entry.get("new_polygon", []))
-		if dented_polygon.empty():
-			if LOGGER: LOGGER.warn("%s: dented polygon for marker %d is degenerate — skipping." % [
-				CLASS_NAME, m_id])
-			continue
-
-		var dented_shapes: Array = _fill_pattern(dented_polygon)
-		var dented_wall = null
-		if active_outline_mode == OutlineMode.WALL:
-			dented_wall = _build_wall(dented_polygon)
-		elif active_outline_mode == OutlineMode.PATH:
-			_build_path(dented_polygon)
-
-		if not dented_shapes.empty():
-			all_new_shapes += dented_shapes
-		_registry.register(m_id, dented_shapes,
-			[dented_wall] if dented_wall != null else [])
-
-	# ---- 4. Record history ----
-	if not all_new_shapes.empty():
-		_record_history(BuildingPlannerHistory.PatternFillRecord.new(
-			_parent_mod, LOGGER, all_new_shapes))
-
-	if LOGGER: LOGGER.info("%s: Conforming placed marker %d, dented %d existing markers at %s." % [
-		CLASS_NAME, new_marker_id, affected.size(), str(coords)])
-	return true
-
-## Wrapping mode: the new marker's own outline is dented wherever it overlaps
-## existing Shape markers (Difference applied to the new shape only).
-## Existing markers are left completely untouched.
-## Falls back gracefully to Single behaviour when no markers overlap
-## (new marker is placed intact, affected_markers is empty).
-func _build_room_wrapping(coords: Vector2, state: Dictionary) -> bool:
-	if not _gl_api:
-		if LOGGER: LOGGER.error("%s: GuidesLinesApi not available." % CLASS_NAME)
-		return false
-
-	if not _parent_mod:
-		if LOGGER: LOGGER.error("%s: parent_mod not set." % CLASS_NAME)
-		return false
-
-	if not _gl_api.has_method("place_shape_wrapping"):
-		if LOGGER: LOGGER.error(
-			"%s: place_shape_wrapping not found — update GuidesLines." % CLASS_NAME)
-		return false
-
-	if _gl_api.has_method("is_ready") and not _gl_api.is_ready():
-		if LOGGER: LOGGER.warn("%s: GuidesLinesApi not ready yet." % CLASS_NAME)
-		return false
-
-	if not state.get("ready", false) or state.get("active_marker_type", "") != "Shape":
-		if LOGGER: LOGGER.warn("%s: GuidesLines is not in Shape mode." % CLASS_NAME)
-		return false
-
-	# ---- 1. Place the new marker with its outline dented by existing markers ----
-	var wrap_result: Dictionary = _gl_api.place_shape_wrapping(
-		coords,
-		state.get("active_shape_radius", 1.0) * shape_scale_factor,
-		state.get("active_shape_angle",  0.0) + shape_angle_offset,
-		state.get("active_shape_sides",  6),
-		state.get("active_color",        null)
-	)
-
-	var new_marker_id: int = wrap_result.get("marker_id", -1)
-	if new_marker_id < 0:
-		if LOGGER: LOGGER.error("%s: place_shape_wrapping returned failure." % CLASS_NAME)
-		return false
-
-	# ---- 2. Resolve the final (dented) polygon for the new marker ----
-	# The dented outline is reported directly by the API — compute_fill_polygon
-	# would return the original shape, so we use marker_polygon instead.
-	var new_polygon: Array = _sanitize_polygon(
-		wrap_result.get("marker_polygon", []))
-
-	if new_polygon.empty():
-		if LOGGER: LOGGER.warn(
-			"%s: Wrapping — new marker polygon is degenerate or fully covered — skipping fill." % CLASS_NAME)
-		_gl_api.delete_marker(new_marker_id)
-		return false
-
-	# ---- 3. Fill + outline the new (dented) marker only ----
-	# Existing markers are intentionally left untouched.
-	var new_shapes: Array = _fill_pattern(new_polygon)
-	var new_wall = null
-	if active_outline_mode == OutlineMode.WALL:
-		new_wall = _build_wall(new_polygon)
-	elif active_outline_mode == OutlineMode.PATH:
-		_build_path(new_polygon)
-
-	# ---- 4. Register for potential future cleanup ----
-	_registry.register(new_marker_id, new_shapes,
-		[new_wall] if new_wall != null else [])
-
-	# ---- 5. Record history ----
-	if not new_shapes.empty():
-		_record_history(BuildingPlannerHistory.PatternFillRecord.new(
-			_parent_mod, LOGGER, new_shapes))
-
-	var affected_count: int = wrap_result.get("affected_markers", []).size()
-	if LOGGER: LOGGER.info(
-		"%s: Wrapping placed marker %d (dented by %d existing markers) at %s." % [
-			CLASS_NAME, new_marker_id, affected_count, str(coords)])
-	return true
-
-## Difference mode: punches a virtual shape out of every overlapping existing
-## Shape marker.  No new marker is placed on the map; only the existing markers'
-## outlines are modified.  Their fills and walls are rebuilt to match.
-## Falls back gracefully (no-op) when no markers overlap.
-func _build_room_difference(coords: Vector2, state: Dictionary) -> bool:
-	if not _gl_api:
-		if LOGGER: LOGGER.error("%s: GuidesLinesApi not available." % CLASS_NAME)
-		return false
-
-	if not _parent_mod:
-		if LOGGER: LOGGER.error("%s: parent_mod not set." % CLASS_NAME)
-		return false
-
-	if not _gl_api.has_method("apply_shape_difference"):
-		if LOGGER: LOGGER.error(
-			"%s: apply_shape_difference not found — update GuidesLines." % CLASS_NAME)
-		return false
-
-	if _gl_api.has_method("is_ready") and not _gl_api.is_ready():
-		if LOGGER: LOGGER.warn("%s: GuidesLinesApi not ready yet." % CLASS_NAME)
-		return false
-
-	if not state.get("ready", false) or state.get("active_marker_type", "") != "Shape":
-		if LOGGER: LOGGER.warn("%s: GuidesLines is not in Shape mode." % CLASS_NAME)
-		return false
-
-	# ---- 1. Apply virtual difference — no new marker is placed ----
-	var diff_result: Dictionary = _gl_api.apply_shape_difference(
-		coords,
-		state.get("active_shape_radius", 1.0) * shape_scale_factor,
-		state.get("active_shape_angle",  0.0) + shape_angle_offset,
-		state.get("active_shape_sides",  6)
-	)
-
-	if diff_result.empty():
-		if LOGGER: LOGGER.error("%s: apply_shape_difference returned internal failure." % CLASS_NAME)
-		return false
-
-	var affected: Array = diff_result.get("affected_markers", [])
-	if affected.empty():
-		if LOGGER: LOGGER.info("%s: Difference — no overlapping markers at %s." % [CLASS_NAME, str(coords)])
-		return true   # Graceful no-op: nothing to cut
-
-	# ---- 2. Rebuild fill + outline for every dented existing marker ----
-	var all_new_shapes: Array = []
-	for entry in affected:
-		var m_id: int = entry.get("marker_id", -1)
-		if m_id < 0:
-			continue
-
-		# Remove stale fills and walls owned by this marker before replacing them.
-		_registry.cleanup(m_id)
-
-		# Use the dented polygon reported by the API — the marker outline has
-		# changed, so compute_fill_polygon would return stale geometry.
-		var dented_polygon: Array = _sanitize_polygon(entry.get("new_polygon", []))
-		if dented_polygon.empty():
-			if LOGGER: LOGGER.warn("%s: Difference — dented polygon for marker %d is degenerate (fully consumed) — skipping." % [
-				CLASS_NAME, m_id])
-			continue
-
-		var dented_shapes: Array = _fill_pattern(dented_polygon)
-		var dented_wall = null
-		if active_outline_mode == OutlineMode.WALL:
-			dented_wall = _build_wall(dented_polygon)
-		elif active_outline_mode == OutlineMode.PATH:
-			_build_path(dented_polygon)
-
-		if not dented_shapes.empty():
-			all_new_shapes += dented_shapes
-		_registry.register(m_id, dented_shapes,
-			[dented_wall] if dented_wall != null else [])
-
-	# ---- 3. Record history ----
-	if not all_new_shapes.empty():
-		_record_history(BuildingPlannerHistory.PatternFillRecord.new(
-			_parent_mod, LOGGER, all_new_shapes))
-
-	if LOGGER: LOGGER.info("%s: Difference dented %d existing markers at %s." % [
-		CLASS_NAME, affected.size(), str(coords)])
-	return true
-
-# ============================================================================
-# PRIVATE — POLYGON SANITIZE
-# ============================================================================
-
-## Removes consecutive duplicate vertices (distance < epsilon) and validates
-## the result has at least 3 distinct points.
-## Returns an empty Array when the polygon is degenerate.
-func _sanitize_polygon(polygon: Array, epsilon: float = 0.5) -> Array:
-	if polygon.size() < 3:
-		return []
-	var result: Array = []
-	var n: int = polygon.size()
-	for i in range(n):
-		var p: Vector2 = polygon[i]
-		var prev: Vector2 = polygon[(i - 1 + n) % n]
-		if p.distance_to(prev) > epsilon:
-			result.append(p)
-	if result.size() < 3:
-		return []
-	return result
-
-# ============================================================================
-# PRIVATE — PATTERN FILL
-# ============================================================================
-
-func _fill_pattern(polygon: Array) -> Array:
-	if not active_texture:
-		if LOGGER: LOGGER.warn("%s: no pattern texture selected, skipping fill." % CLASS_NAME)
-		return []
-
-	var _global = _parent_mod.Global
-	if not _global.World or not _global.World.Level:
-		if LOGGER: LOGGER.error("%s: World/Level not loaded." % CLASS_NAME)
-		return []
-
-	var pattern_shapes = _global.World.Level.PatternShapes
-	# Snapshot by instance id — DrawPolygon may insert the new shape at any
-	# position in GetShapes() depending on which layer-node it lands on.
-	var ids_before: Dictionary = {}
-	for s in pattern_shapes.GetShapes():
-		ids_before[s.get_instance_id()] = true
-
-	pattern_shapes.DrawPolygon(PoolVector2Array(polygon), false)
-
-	var new_shapes: Array = []
-	for shape in pattern_shapes.GetShapes():
-		if not shape or not is_instance_valid(shape):
-			continue
-		if ids_before.has(shape.get_instance_id()):
-			continue
-		shape.SetOptions(active_texture, active_color, deg2rad(active_rotation))
-		shape.SetLayer(active_layer)
-		if active_outline:
-			shape.SetPoints(shape.polygon, true)
-		new_shapes.append(shape)
-
-	return new_shapes
-
-# ============================================================================
-# PRIVATE — WALL BUILD
-# ============================================================================
-
-func _build_wall(polygon: Array):
-	var _global = _parent_mod.Global
-	if not _global.World or not _global.World.Level:
-		if LOGGER: LOGGER.error("%s: World/Level not loaded." % CLASS_NAME)
-		return null
-
-	var wall_texture = null
-	if _global.Editor and _global.Editor.Tools.has("WallTool"):
-		var wt = _global.Editor.Tools["WallTool"]
-		wall_texture = wt.Texture
-	else:
-		if LOGGER: LOGGER.warn("%s: WallTool not found, using defaults." % CLASS_NAME)
-
-	var walls = _global.World.Level.Walls
-	if not walls:
-		if LOGGER: LOGGER.error("%s: Walls node not found in Level." % CLASS_NAME)
-		return null
-
-	var new_wall = walls.AddWall(
-		PoolVector2Array(polygon),
-		wall_texture,
-		active_wall_color,
-		true,           # loop = closed contour
-		active_shadow,
-		0,              # type = Auto
-		active_joint,
-		true            # normalizeUV
-	)
-
-	if not new_wall:
-		if LOGGER: LOGGER.warn("%s: AddWall returned null." % CLASS_NAME)
-		return null
-
-	return new_wall
-
-# ============================================================================
-# PRIVATE — PATH BUILD
-# ============================================================================
-
-## Builds a path along [polygon] using the current active_path_* settings.
-## Mirrors the logic of PathBuilder.build_at() but accepts a pre-computed polygon.
-func _build_path(polygon: Array) -> void:
-	var _global = _parent_mod.Global
-	if not _global.World or not _global.World.Level:
-		if LOGGER: LOGGER.error("%s: World/Level not loaded." % CLASS_NAME)
-		return
-
-	# Close polygon (Line2D has no built-in closed property)
-	var pts: Array = polygon.duplicate()
-	if pts.size() > 0:
-		pts.append(pts[0])
-
-	var pathways = _global.World.Level.Pathways
-	if not pathways:
-		if LOGGER: LOGGER.error("%s: Pathways node not found in Level." % CLASS_NAME)
-		return
-
-	var path_texture = null
-	if _global.Editor and _global.Editor.Tools.has("PathTool"):
-		path_texture = _global.Editor.Tools["PathTool"].Texture
-	else:
-		if LOGGER: LOGGER.warn("%s: PathTool not found, using defaults." % CLASS_NAME)
-
-	var new_path = pathways.CreatePath(
-		path_texture,
-		active_path_layer,
-		active_path_sorting,
-		active_path_fade_in,
-		active_path_fade_out,
-		active_path_grow,
-		active_path_shrink
-	)
-	if not new_path:
-		if LOGGER: LOGGER.error("%s: CreatePath returned null." % CLASS_NAME)
-		return
-
-	new_path.position = Vector2.ZERO
-	new_path.SetEditPoints(PoolVector2Array(pts))
-	new_path.Smoothness = active_path_smoothness
-	new_path.Smooth()
-	new_path.SetWidthScale(active_path_width)
-	new_path.modulate = active_path_color
-
-	if active_path_block_light:
-		new_path.SetBlockLight(true)
-
-	# Determine next node_id from existing paths
-	var max_node_id: int = 0
-	for child in pathways.get_children():
-		if child == new_path:
-			continue
-		if child.has_meta("node_id"):
-			var nid = child.get_meta("node_id")
-			if typeof(nid) == TYPE_INT and nid > max_node_id:
-				max_node_id = nid
-	new_path.set_meta("node_id", max_node_id + 1)
-	new_path.set_meta("preview", false)
-
-	# Re-register via Save/Load cycle (same pattern as PathBuilder)
-	var path_data = new_path.Save(false)
-	if not path_data or path_data.empty():
-		if LOGGER: LOGGER.error("%s: Path.Save() returned empty data." % CLASS_NAME)
-		return
-	var path_index: int = new_path.get_index()
-	new_path.queue_free()
-	var loaded_path = pathways.LoadPathway(path_data)
-	if not loaded_path:
-		if LOGGER: LOGGER.error("%s: LoadPathway() returned null." % CLASS_NAME)
-		return
-	pathways.move_child(loaded_path, path_index)
-
-	# Re-apply color: LoadPathway() resets modulate to white, so we must set it
-	# again after loading. Store it in CAMT's ModMapData for map save/reload
-	# persistence when ColourAndModifyThings is installed.
-	if active_path_color != Color.white:
-		loaded_path.modulate = active_path_color
-		if loaded_path.has_meta("node_id"):
-			BuildingPlannerUtils.store_path_color_for_camt(
-				_parent_mod.Global,
-				loaded_path.get_meta("node_id"),
-				active_path_color
-			)
-
-	if LOGGER: LOGGER.info("%s: path outline built with %d points." % [CLASS_NAME, polygon.size()])
-
-# ============================================================================
-# PRIVATE — HISTORY
-# ============================================================================
-
-func _record_history(record) -> void:
-	if not _parent_mod:
-		return
-	var api = _parent_mod.Global.API
-	if api and api.has("HistoryApi"):
-		api.HistoryApi.record(record, 100)
-	elif LOGGER:
-		LOGGER.warn("%s: HistoryApi not available — action will not be undoable." % CLASS_NAME)
+		_operation._loose = {"fills": shapes, "walls": outlines}
+	return success

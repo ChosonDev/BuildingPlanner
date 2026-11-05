@@ -33,7 +33,7 @@ jobs:
     - name: Zip Release
       run: |
         mkdir -p /tmp/release/BuildingPlanner
-        rsync -a --exclude='.git' --exclude='.github' --exclude='.gitignore' --exclude='.gitmodules' . /tmp/release/BuildingPlanner/
+        rsync -a --exclude='.git' --exclude='.github' --exclude='.gitignore' --exclude='.gitmodules' --exclude='tests' --exclude='TODO.md' --exclude='icons/BuildingPlanner_Icon_100x100.png' --exclude='icons/BuildingPlanner_Icon_32x32.png' --exclude='icons/BuildingPlanner_Icon_64x64.png' --exclude='AGENTS.md' --exclude='.agents' . /tmp/release/BuildingPlanner/
         cd /tmp/release
         zip -r $GITHUB_WORKSPACE/BuildingPlanner.zip BuildingPlanner
     - name: Deploy Release

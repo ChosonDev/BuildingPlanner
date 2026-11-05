@@ -5,6 +5,136 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.2.4]
+
+### Changed
+- Share standalone native-object history while preserving path tint, world IDs,
+  original order and shared roof sunlight replay.
+- Rebuild room cuts using explicit saved settings without temporary feature objects
+  or runtime property introspection; retain isolated history snapshots.
+- Poll the compact GuidesLines shape state when available, with full-state fallback,
+  and access UI lifecycle through methods instead of private controls/panels.
+
+### Added
+- Test runner accepts `--keep-results N` to retain the newest completed reports
+  while preserving running and unrecognized artifacts; report retention is checked
+  in a disposable directory.
+- Wall Builder and Path Builder trace nearby open or closed GuidesLines Path
+  markers, with validated serialized coordinates and undo/redo. Shape regions
+  remain the fallback when the nearest marker within 100 world units is not a Path.
+
+### Fixed
+- Pass `false` explicitly to native PatternShape, Pathway and Roof `Save(bool)`
+  calls during history capture, preserving world IDs without relying on C#
+  optional arguments across the GDScript boundary. Keep Wall's argument-free Save.
+- Log room history snapshot and registration stages to locate native failures
+  after temporary Single marker deletion.
+- Reject incomplete room shape state and missing saved room metadata with diagnostics
+  and rollback; preserve layer selections when LayerApi returns no layers.
+- Distinguish ordinary marker misses from malformed API geometry, and report missing
+  standalone fill textures while retaining Room Builder's No fill option.
+- Use arrays for asset paths and avoid eagerly allocated registry lookup defaults.
+- Invalid Path/Room API results, capture failures and asset-loading failures now
+  produce diagnostics; empty layer refresh preserves the previous selection.
+- Path creation avoids copying its input, roof polling avoids unchanged lighting
+  allocations, and roof offset sanitization avoids a redundant Array conversion.
+- Roof initialization applies texture and shared lighting before geometry, matching
+  native Hip roof loading and avoiding different edge widths after Undo/Redo.
+- Roof controls refresh after native sunlight edits and history on the same level,
+  while preserving draft edits until the native lighting changes.
+- Successful Single rooms omit temporary marker records from compound history.
+- Room clicks use their supplied coordinates for snapping; wheel rotation uses
+  the consistent 0–360 degree range.
+- Room Builder uses the saved Shape parameters regardless of the active GuidesLines
+  marker tab. Merge includes the clicked level as well as existing room levels.
+- Path color controls track late CAMT initialization without reopening the panel.
+- Late GuidesLines registration preserves edited panel settings and Room sub-mode
+  and outline selections. Enable safely handles APIs without tool-state access.
+- Roof controls read each level's shared lighting on level changes, including
+  before placement; new maps initialize style defaults using their tile size.
+- Plain-marker cuts retain marker history without empty native-object snapshots;
+  Difference without overlap still creates no Undo step.
+- Room wheel controls leave sidebar scrolling available. Single rooms use their
+  own marker outline even when other shapes overlap the placement, independently
+  of the active GuidesLines Conform/Wrap mode (requires its companion API update).
+- Conform and Difference preserve each existing room's materials, outline type,
+  color and settings; cuts in plain GuidesLines markers create no native objects.
+- Map catalog restoration loads only the selected texture; a missing asset falls
+  back to the first entry and its default color. Failed loads clear stale textures.
+- Path deletion and undo remove owned CAMT persistence keys; repeated redo does
+  not accumulate old IDs. Failed toolbar creation disconnects and retries cleanly.
+- Map transitions clear stale textures and restore selected assets and user colors
+  from the new catalog; roof choices persist across tool switches.
+- Roof placement requires a selected texture, split offsets retain the largest
+  contour by area, and Pattern Fill redo restores sibling order.
+- Room previews validate the same API capabilities and shape settings as placement;
+  history restores native fill/wall colors without applying a second tint.
+- Hiding sections and disabling the tool release owned asset-search focus.
+- Layer selectors publish their fallback to feature settings after map/layer changes.
+- Discarded fill/path/roof history releases saved data in both directions; redo
+  loaders receive isolated snapshots for repeatable undo/redo.
+- Boolean rooms retain geometry on each original level, including merged rooms
+  spanning levels; history restores fills and outlines to their owning levels.
+- Room preview and placement refresh GuidesLines state through its public API.
+- Standalone walls record one undoable action and use native Manual wall semantics.
+- Roof defaults convert tile width to pixels per map and retain user choices
+  across tool switches. Sunlight uses the host's persistent level settings; undo
+  and redo restore lighting and roof order together.
+- Colorable patterns retain their thumbnail's default tint; Room Builder exposes
+  No fill. Pattern loading keeps native repeat flags without a second SetOptions.
+- Asset selection uses GetAssetTexture without changing native tools or Infobar.
+  Path catalogs remain complete and stable regardless of native search filters.
+- Room operations group marker edits, pattern fills and Wall/Path outlines into
+  one history action, restore replaced objects and registry associations, and
+  roll back failed creation. Pattern creation avoids native duplicate history.
+- Wall and path textures remain independent between standalone and room modes.
+- Geometry validation rejects malformed, non-finite, degenerate and crossing
+  outlines while preserving GuidesLines hole bridges and tangent contours.
+- Path initialization uses world-assigned IDs; redo restores color and tree order.
+- Tool/map lifecycle cleans up overlays and owned subscriptions safely.
+
+### Changed
+- Paths load directly from native saved data without creating a temporary node;
+  native initialization, tint, history and Under/Over ordering are retained.
+- Layer selectors resolve their own panel settings. Release archives omit the
+  three unused icon variants while retaining the toolbar icon.
+- Room Builder displays wheel rotation/scale overrides and offers a reset button.
+- Asset search caches normalized names, splits words once and restores selection
+  during filtering. White paths avoid new CAMT entries; final loaded paths own tint.
+- Registry cleanup no longer returns queued nodes. Unused camera and mode state
+  are removed, panel traversal is shared, and release archives exclude TODO.md.
+- Polygon checks skip non-adjacent-edge work for triangles and reject distant
+  vertices before closest-point calculations, retaining contact tolerance.
+- Room API capabilities are checked on construction, and preview/placement share
+  one validated shape-parameter calculation. History rejects stale maps first.
+- Layer/sorting controls, default tints, polygon area and scene removal use shared
+  helpers. Roof styles use the same grid as other panels; Snappy binding is cached.
+- Layer selectors share one query and sorted snapshot; Room preview skips public
+  API state allocation over UI. Geometry validation avoids temporary endpoint
+  arrays and repeated Ridge sanitization. Room rebuilding copies only level data.
+- Panel controls and bound signals share small helpers; standalone features use
+  one build entry point and shared level validation. Fresh path loads avoid a
+  redundant copy while history retains isolated replay snapshots.
+- Panels bind directly to feature settings; Room Builder retains independent fill,
+  wall and path components instead of copying settings into temporary builders.
+- Asset catalogs are shared lazily per map while panel searches and selections
+  remain independent. Map changes and unload invalidate the catalogs.
+- Panel helpers, canvas dispatch, native path restoration and history guards are
+  shared. Standalone fill/path history stores one node instead of parallel arrays.
+- Room preview clears only once while idle over UI; active previews still refresh
+  each frame for the GuidesLines draw lifecycle.
+- Polygon resolution and history routing are shared by the feature builders.
+- Wall thumbnails are tinted without loading full textures; disjoint polygon
+  edges skip intersection calls, wall reload lookup is constant time, and overlay
+  scripts are retained across tool switches.
+- Texture grids populate only for the active section and survive tool switches.
+- Raw pattern textures reuse Godot's existing resource cache.
+- Room construction shares the feature builders; unused Mirror Mode helpers and
+  unused grid methods were removed. No new dependency was added.
+- Room Builder requires the companion GuidesLines history-capture API changes.
+
+---
+
 ## [1.2.3] — 2026-05-11
 
 ### Fixed

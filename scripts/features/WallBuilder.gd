@@ -1,19 +1,21 @@
 extends Reference
 
 # BuildingPlanner - Dungeondraft Mod
-# WallBuilder: places a closed wall along the outline of a Shape marker under a click.
+# WallBuilder: traces a nearby Path marker or a filled Shape outline.
 #
 # Workflow:
 #   1. User clicks on the map while Wall Builder mode is active.
-#   2. BuildingPlannerTool.handle_wall_builder_click(world_pos) is called.
-#   3. GuidesLinesApi.compute_fill_polygon(coords) resolves the polygon.
-#   4. Walls.AddWall(polygon, ...) creates the closed wall outline.
+#   2. BuildingPlannerTool.handle_canvas_click(world_pos) is called.
+#   3. Resolve a nearby Path marker, falling back to compute_fill_polygon(coords).
+#   4. Walls.AddWall(points, ..., closed, ...) creates the wall.
 #
 # Texture source: WallTool.Controls["Texture"] GridMenu (mirrored in our own ItemList).
 # Color source:   active_color (set from UI color picker, default white).
 # Requires GuidesLines >= 2.2.0 (compute_fill_polygon).
 
 const CLASS_NAME = "WallBuilder"
+const BuildingPlannerUtils = preload("../utils/BuildingPlannerUtils.gd")
+const BuildingPlannerHistory = preload("../tool/BuildingPlannerHistory.gd")
 
 # ============================================================================
 # REFERENCES
@@ -27,8 +29,8 @@ var _parent_mod = null
 # SETTINGS
 # ============================================================================
 
-# Texture is always read from WallTool at click time (our GridMenu drives it via
-# OnItemSelected). Color is stored here so the UI color picker has effect.
+# The feature owns its selection independently of the built-in tool.
+var active_texture = null
 var active_color:  Color = Color.white
 var active_shadow: bool = true
 var active_joint:  int  = 1    # 0 = Sharp, 1 = Bevel, 2 = Round
@@ -46,70 +48,62 @@ func _init(gl_api, logger, parent_mod = null):
 # BUILD BY WORLD POSITION
 # ============================================================================
 
-## Builds a closed wall along the Shape marker outline under [coords] (world-space).
+## Traces a Path marker near [coords], or the enclosing Shape region (world-space).
 ## Requires GuidesLines >= 2.2.0. Returns true on success.
 func build_at(coords: Vector2) -> bool:
-	if not _gl_api:
-		if LOGGER: LOGGER.error("%s: GuidesLinesApi not available." % CLASS_NAME)
+	var outline = BuildingPlannerUtils.resolve_outline(_gl_api, coords, LOGGER)
+	if outline.empty():
 		return false
 
-	if not _gl_api.has_method("compute_fill_polygon"):
-		if LOGGER: LOGGER.error(
-			"%s: compute_fill_polygon not found in GuidesLinesApi." % CLASS_NAME + "\n" +
-			"  Update GuidesLines to v2.2.0+ in your Dungeondraft mods folder.")
+	var wall = _create_wall(outline.points, null, outline.closed)
+	if not is_instance_valid(wall):
 		return false
+	BuildingPlannerHistory.record_action(_parent_mod, LOGGER, BuildingPlannerHistory.WallBuilderRecord.new(_parent_mod, wall))
+	return true
 
-	if _gl_api.has_method("is_ready") and not _gl_api.is_ready():
-		if LOGGER: LOGGER.warn("%s: GuidesLinesApi not ready yet (map still loading?)" % CLASS_NAME)
-		return false
+## Snapshot the complete style; callers own the returned Dictionary.
+func get_settings() -> Dictionary:
+	return {
+		"active_texture": active_texture,
+		"active_color": active_color,
+		"active_shadow": active_shadow,
+		"active_joint": active_joint,
+	}
 
-	if not _parent_mod:
-		if LOGGER: LOGGER.error("%s: parent_mod not set." % CLASS_NAME)
-		return false
-
-	# --- Resolve polygon via GuidesLinesApi ---
-	var result = _gl_api.compute_fill_polygon(coords)
-	if typeof(result) != TYPE_DICTIONARY:
-		return false
-
-	var polygon: Array = result.get("polygon", [])
-	if polygon.empty():
-		if LOGGER: LOGGER.warn("%s: empty polygon returned at %s." % [CLASS_NAME, str(coords)])
-		return false
-
-	# --- Read current WallTool state ---
-	var _global = _parent_mod.Global
-	if not _global.World or not _global.World.Level:
+## Explicit saved settings leave the live UI selection untouched.
+func _create_wall(polygon: Array, level = null, closed: bool = true, settings = null):
+	if settings == null:
+		settings = get_settings()
+	# --- Dungeondraft context ---
+	level = BuildingPlannerUtils.resolve_level(_parent_mod, level)
+	if not level:
 		if LOGGER: LOGGER.error("%s: World/Level not loaded." % CLASS_NAME)
-		return false
+		return null
+	var wall_texture = settings.active_texture
+	if not wall_texture is Texture:
+		if LOGGER: LOGGER.error("WallBuilder: select a valid texture before building.")
+		return null
 
-	var wall_texture = null
-	if _global.Editor and _global.Editor.Tools.has("WallTool"):
-		var wt = _global.Editor.Tools["WallTool"]
-		wall_texture = wt.Texture
-	else:
-		if LOGGER: LOGGER.warn("%s: WallTool not found, using defaults." % CLASS_NAME)
-
-	var walls = _global.World.Level.Walls
+	var walls = level.Walls
 	if not walls:
 		if LOGGER: LOGGER.error("%s: Walls node not found in Level." % CLASS_NAME)
-		return false
+		return null
 
-	# --- Create the closed wall ---
+	# --- Create the wall ---
 	var new_wall = walls.AddWall(
 		PoolVector2Array(polygon),
 		wall_texture,
-		active_color,
-		true,            # loop = true → closed contour
-		active_shadow,
-		0,               # type = Auto
-		active_joint,
+		settings.active_color,
+		closed,
+		settings.active_shadow,
+		1,               # type = Manual, as in the native WallTool
+		settings.active_joint,
 		true             # normalizeUV
 	)
 
 	if not new_wall:
 		if LOGGER: LOGGER.warn("%s: AddWall returned null." % CLASS_NAME)
-		return false
+		return null
 
 	if LOGGER: LOGGER.info("%s: wall built with %d points." % [CLASS_NAME, polygon.size()])
-	return true
+	return new_wall

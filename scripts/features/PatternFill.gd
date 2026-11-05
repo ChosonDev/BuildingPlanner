@@ -5,14 +5,15 @@ extends Reference
 #
 # Workflow:
 #   1. User clicks on the map while Pattern Fill mode is active.
-#   2. BuildingPlannerTool.handle_pattern_fill_click(world_pos) is called.
+#   2. BuildingPlannerTool.handle_canvas_click(world_pos) is called.
 #   3. GuidesLinesApi.compute_fill_polygon(coords) resolves the polygon.
-#   4. PatternShapes.DrawPolygon(polygon) creates the shape.
-#   5. SetOptions / SetLayer / SetPoints apply texture, color, layer, outline.
+#   4. PatternShapes.LoadShape() creates the configured shape without native history.
+#   5. A custom history record owns the operation.
 #
 # Requires GuidesLines >= 2.2.0 (compute_fill_polygon, get_shape_polygon).
 
 const CLASS_NAME = "PatternFill"
+const BuildingPlannerUtils = preload("../utils/BuildingPlannerUtils.gd")
 const BuildingPlannerHistory = preload("../tool/BuildingPlannerHistory.gd")
 
 # ============================================================================
@@ -24,14 +25,14 @@ var LOGGER = null
 var _parent_mod = null
 
 # ============================================================================
-# SETTINGS  (mirrored to PatternShapeTool before each fill)
+# SETTINGS (owned by this feature)
 # ============================================================================
 
 var active_texture = null    # Texture — selected in our own GridMenu
 var active_color: Color = Color.white
 var active_rotation: float = 0.0   # degrees
 var active_outline: bool = false
-var active_layer: int = 100  # layer z_index — 100 = User Layer 1
+var active_layer: int = BuildingPlannerUtils.DEFAULT_LAYER  # layer z_index — 100 = User Layer 1
 
 # ============================================================================
 # INIT
@@ -48,87 +49,60 @@ func _init(gl_api, logger, parent_mod = null):
 
 ## Fills the Shape marker area under [coords] (world-space) with the active texture.
 ## Requires GuidesLines >= 2.2.0. Returns true on success.
-func fill_at(coords: Vector2) -> bool:
-	if not _gl_api:
-		if LOGGER: LOGGER.error("%s: GuidesLinesApi not available." % CLASS_NAME)
-		return false
-
-	if not _gl_api.has_method("compute_fill_polygon"):
-		if LOGGER: LOGGER.error(
-			"%s: compute_fill_polygon not found in GuidesLinesApi." % CLASS_NAME + "\n" +
-			"  Update GuidesLines to v2.2.0+ in your Dungeondraft mods folder.")
-		return false
-
-	if _gl_api.has_method("is_ready") and not _gl_api.is_ready():
-		if LOGGER: LOGGER.warn("%s: GuidesLinesApi not ready yet (map still loading?)" % CLASS_NAME)
-		return false
-
-	# --- Resolve polygon via GuidesLinesApi ---
-	var result = _gl_api.compute_fill_polygon(coords)
-	if typeof(result) != TYPE_DICTIONARY:
-		return false
-
-	var polygon: Array = result.get("polygon", [])
+func build_at(coords: Vector2) -> bool:
+	var polygon = BuildingPlannerUtils.resolve_fill_polygon(_gl_api, coords, LOGGER)
 	if polygon.empty():
-		if LOGGER: LOGGER.warn("%s: empty polygon returned at %s." % [CLASS_NAME, str(coords)])
 		return false
 
 
-	# --- Dungeondraft context ---
-	if not _parent_mod:
-		if LOGGER: LOGGER.error("%s: parent_mod not set." % CLASS_NAME)
+	var shape = _create_shape(polygon)
+	if not is_instance_valid(shape):
 		return false
-	var _global = _parent_mod.Global
-	if not _global.World or not _global.World.Level:
-		if LOGGER: LOGGER.error("%s: World/Level not loaded." % CLASS_NAME)
-		return false
-
-	var pattern_shapes = _global.World.Level.PatternShapes
-
-	# --- Snapshot existing shapes to identify newly created ones ---
-	# NOTE: Use instance-id set-difference, NOT index range.
-	# DrawPolygon() places the new shape on PatternShapeTool.ActiveLayer, which may be
-	# a different layer-node than active_layer. Layer nodes are ordered by creation time
-	# in the scene tree, so GetShapes() can return the new shape at ANY index — not
-	# necessarily at the end. An index-based range(count_before, after.size()) would
-	# point at pre-existing shapes instead of the newly created one.
-	var ids_before: Dictionary = {}
-	for s in pattern_shapes.GetShapes():
-		ids_before[s.get_instance_id()] = true
-
-	# --- Create the PatternShape ---
-	pattern_shapes.DrawPolygon(PoolVector2Array(polygon), false)
-
-	# --- Apply settings to newly created shape(s) ---
-	var new_shapes: Array = []
-	for shape in pattern_shapes.GetShapes():
-		if not shape or not is_instance_valid(shape):
-			continue
-		if ids_before.has(shape.get_instance_id()):
-			continue
-		if active_texture:
-			shape.SetOptions(active_texture, active_color, deg2rad(active_rotation))
-		shape.SetLayer(active_layer)
-		if active_outline:
-			shape.SetPoints(shape.polygon, true)
-		new_shapes.append(shape)
-
-	# --- Record undo/redo history ---
-	if not new_shapes.empty():
-		_record_history(BuildingPlannerHistory.PatternFillRecord.new(_parent_mod, LOGGER, new_shapes))
-
+	BuildingPlannerHistory.record_action(_parent_mod, LOGGER, BuildingPlannerHistory.PatternFillRecord.new(_parent_mod, shape))
 	return true
 
-# ============================================================================
-# HISTORY HELPERS
-# ============================================================================
+## Snapshot the complete style; callers own the returned Dictionary.
+func get_settings() -> Dictionary:
+	return {
+		"active_texture": active_texture,
+		"active_color": active_color,
+		"active_rotation": active_rotation,
+		"active_outline": active_outline,
+		"active_layer": active_layer,
+	}
 
-## Records [record] into the HistoryApi (undo/redo stack) if available.
-func _record_history(record) -> void:
-	if not _parent_mod:
-		return
-	var api = _parent_mod.Global.API
-	if api and api.has("HistoryApi"):
-		api.HistoryApi.record(record, 100)
-	elif LOGGER:
-		LOGGER.warn("%s: HistoryApi not available — action will not be undoable." % CLASS_NAME)
+## Explicit saved settings leave the live UI selection untouched.
+func _create_shape(polygon: Array, level = null, settings = null):
+	if settings == null:
+		settings = get_settings()
+	if not settings.active_texture is Texture:
+		if LOGGER: LOGGER.error("PatternFill: select a valid texture before building.")
+		return null
+	# --- Dungeondraft context ---
+	level = BuildingPlannerUtils.resolve_level(_parent_mod, level)
+	if not level:
+		if LOGGER: LOGGER.error("%s: World/Level not loaded." % CLASS_NAME)
+		return null
+	if not level.PatternShapes:
+		if LOGGER: LOGGER.error("PatternFill: PatternShapes node not found in Level.")
+		return null
+
+	# Native DrawPolygon records its own history. LoadShape creates the same native
+	# node without adding an independent undo step or using PatternShapeTool state.
+	# Dictionary values match the host's PatternShape.Save / DictionaryEx format.
+	var data = {
+		"points": var2str(PoolVector2Array(polygon)),
+		"position": var2str(Vector2.ZERO),
+		"scale": var2str(Vector2.ONE),
+		"shape_rotation": 0.0,
+		"layer": settings.active_layer,
+		"color": settings.active_color.to_html(),
+		"outline": settings.active_outline,
+		"rotation": deg2rad(settings.active_rotation),
+		"texture": settings.active_texture.resource_path,
+	}
+	var shape = level.PatternShapes.LoadShape(data)
+	if not is_instance_valid(shape):
+		if LOGGER: LOGGER.error("PatternFill: LoadShape() returned null.")
+		return null
+	return shape

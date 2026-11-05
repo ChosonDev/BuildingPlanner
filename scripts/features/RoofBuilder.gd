@@ -5,13 +5,12 @@ extends Reference
 #
 # Workflow:
 #   1. User clicks on the map while Roof Builder mode is active.
-#   2. BuildingPlannerTool.handle_roof_builder_click(world_pos) is called.
+#   2. BuildingPlannerTool.handle_canvas_click(world_pos) is called.
 #   3. GuidesLinesApi.compute_fill_polygon(coords) resolves the polygon.
 #   4. Roofs.CreateRoof(sorting) creates the roof node.
 #   5. World.AssignNodeID(roof) assigns a persistent ID (required for map saving).
-#   6. roof.Set(polygon, width, type) sets the geometry.
-#   7. roof.SetTileTexture(texture) applies the tile style.
-#   8. roof.SetSunlight() applies shade settings when enabled.
+#   6. Apply tile texture and shared level sunlight before creating geometry.
+#   7. roof.Set(polygon, width, type) builds geometry as in native Roof.Load().
 #
 # Placement modes  (active_placement_mode):
 #   0 Ridge  — polygon defines the ridge line. Eave spreads outward by active_width
@@ -23,12 +22,12 @@ extends Reference
 #              polygon is shrunk inward by active_width, so the roof fills the
 #              interior of the marked area down to the polygon boundary.
 #
-# Texture source: active_texture (set from our RoofPanel), with automatic
-# fallback to the currently selected RoofTool.Texture when active_texture is null.
+# Texture source: active_texture, selected explicitly in RoofPanel.
 #
 # Requires GuidesLines >= 2.2.0 (compute_fill_polygon).
 
 const CLASS_NAME = "RoofBuilder"
+const BuildingPlannerUtils = preload("../utils/BuildingPlannerUtils.gd")
 const BuildingPlannerHistory = preload("../tool/BuildingPlannerHistory.gd")
 
 # ============================================================================
@@ -43,7 +42,7 @@ var _parent_mod = null
 # SETTINGS
 # ============================================================================
 
-var active_texture = null           # Texture — from RoofPanel or null (uses RoofTool)
+var active_texture = null           # Texture — selected in RoofPanel
 var active_width: float = 50.0      # eave width in pixels
 var active_type: int = 0            # 0 = Gable, 1 = Hip, 2 = Dormer
 var active_sorting: int = 0         # 0 = Over, 1 = Under
@@ -71,28 +70,10 @@ func _init(gl_api, logger, parent_mod = null):
 ## Places a roof over the Shape marker area under [coords] (world-space).
 ## Requires GuidesLines >= 2.2.0. Returns true on success.
 func build_at(coords: Vector2) -> bool:
-	if not _gl_api:
-		if LOGGER: LOGGER.error("%s: GuidesLinesApi not available." % CLASS_NAME)
-		return false
-
-	if not _gl_api.has_method("compute_fill_polygon"):
-		if LOGGER: LOGGER.error(
-			"%s: compute_fill_polygon not found in GuidesLinesApi." % CLASS_NAME + "\n" +
-			"  Update GuidesLines to v2.2.0+ in your Dungeondraft mods folder.")
-		return false
-
-	if _gl_api.has_method("is_ready") and not _gl_api.is_ready():
-		if LOGGER: LOGGER.warn("%s: GuidesLinesApi not ready yet (map still loading?)" % CLASS_NAME)
-		return false
-
-	# --- Resolve polygon via GuidesLinesApi ---
-	var result = _gl_api.compute_fill_polygon(coords)
-	if typeof(result) != TYPE_DICTIONARY:
-		return false
-
-	var polygon: Array = result.get("polygon", [])
+	var polygon = BuildingPlannerUtils.resolve_fill_polygon(_gl_api, coords, LOGGER)
 	if polygon.empty():
-		if LOGGER: LOGGER.warn("%s: empty polygon returned at %s." % [CLASS_NAME, str(coords)])
+		return false
+	if not _parent_mod:
 		return false
 
 	# --- Build the actual roof footprint ---
@@ -101,25 +82,15 @@ func build_at(coords: Vector2) -> bool:
 		if LOGGER: LOGGER.warn("%s: roof polygon is empty after processing." % CLASS_NAME)
 		return false
 
-	# --- Dungeondraft context ---
-	if not _parent_mod:
-		if LOGGER: LOGGER.error("%s: parent_mod not set." % CLASS_NAME)
+	var level = BuildingPlannerUtils.resolve_level(_parent_mod)
+	if not level:
+		if LOGGER: LOGGER.error("RoofBuilder: World/Level not loaded.")
 		return false
-
+	if not active_texture is Texture:
+		if LOGGER: LOGGER.error("RoofBuilder: select a valid texture before building.")
+		return false
 	var _global = _parent_mod.Global
-	if not _global.World or not _global.World.Level:
-		if LOGGER: LOGGER.error("%s: World/Level not loaded." % CLASS_NAME)
-		return false
-
-	# --- Resolve texture: prefer active_texture, fall back to RoofTool ---
-	var tex = active_texture
-	if not tex and _global.Editor and _global.Editor.Tools.has("RoofTool"):
-		tex = _global.Editor.Tools["RoofTool"].Texture
-
-	# --- Get Roofs container (Level property first, child node fallback) ---
-	var roofs_node = _global.World.Level.Roofs
-	if not roofs_node:
-		roofs_node = _global.World.Level.get_node_or_null("Roofs")
+	var roofs_node = BuildingPlannerUtils.get_roofs(level)
 	if not roofs_node:
 		if LOGGER: LOGGER.error("%s: Roofs node not found in Level." % CLASS_NAME)
 		return false
@@ -133,26 +104,23 @@ func build_at(coords: Vector2) -> bool:
 	# --- Assign persistent Node ID (required for correct map file saving) ---
 	if not _global.World.has_method("AssignNodeID"):
 		if LOGGER: LOGGER.error("%s: World.AssignNodeID not found — roof skipped." % CLASS_NAME)
-		_free_roof(new_roof)
+		BuildingPlannerUtils.free_node(new_roof, _global.World)
 		return false
 	_global.World.AssignNodeID(new_roof)
 
-	# --- Set geometry (must be called after AssignNodeID) ---
+	# Match Roof.Load: Hip edges must be created with the selected texture.
+	new_roof.SetTileTexture(active_texture)
+
+	# Dungeondraft persists sunlight on the level's Roofs container, in degrees.
+	var sunlight_before = [roofs_node.Shade, roofs_node.SunDirection, roofs_node.ShadeContrast]
+	roofs_node.UpdateSunlight(active_shade, active_sun_direction, active_shade_contrast)
 	new_roof.Set(PoolVector2Array(roof_polygon), active_width, active_type)
-
-	# --- Apply texture ---
-	if tex:
-		new_roof.SetTileTexture(tex)
-
-	# --- Apply sunlight / shade ---
-	if active_shade:
-		new_roof.SetSunlight(true, active_sun_direction, active_shade_contrast)
 
 	if LOGGER: LOGGER.info("%s: roof built with %d points (type=%d sorting=%d width=%.1f mode=%d)." % [
 			CLASS_NAME, roof_polygon.size(), active_type, active_sorting, active_width, active_placement_mode])
 
 	# --- Record undo/redo history ---
-	_record_history(BuildingPlannerHistory.RoofBuilderRecord.new(_parent_mod, LOGGER, new_roof))
+	BuildingPlannerHistory.record_action(_parent_mod, LOGGER, BuildingPlannerHistory.RoofBuilderRecord.new(_parent_mod, LOGGER, new_roof, sunlight_before))
 
 	return true
 
@@ -160,7 +128,7 @@ func build_at(coords: Vector2) -> bool:
 # PRIVATE HELPERS
 # ============================================================================
 
-## Builds the final roof footprint polygon from the raw marker polygon.
+## Builds the final roof footprint from an already validated marker polygon.
 ##
 ## Mode 0 — Ridge: polygon as-is (ridge along the marker edge).
 ## Mode 1 — Expand: inflate polygon OUTWARD by active_width via offset_polygon_2d
@@ -175,28 +143,21 @@ func _build_roof_polygon(polygon: Array) -> Array:
 	var out: Array
 
 	match active_placement_mode:
-		1: # Expand — inflate outward
-			var result = Geometry.offset_polygon_2d(PoolVector2Array(polygon), active_width)
+		1, 2: # Expand / Inset
+			var result = Geometry.offset_polygon_2d(PoolVector2Array(polygon), active_width if active_placement_mode == 1 else -active_width)
 			if result.empty():
-				if LOGGER: LOGGER.warn("%s: Expand offset returned empty; using plain polygon." % CLASS_NAME)
-				out = polygon.duplicate()
+				if LOGGER: LOGGER.warn("%s: roof offset returned empty; skipping roof." % CLASS_NAME)
+				return []
 			else:
+				# ponytail: one offset contour; create multiple roofs if split footprints are needed.
 				var best: PoolVector2Array = result[0]
+				var best_area = abs(BuildingPlannerUtils.signed_area(best))
 				for i in range(1, result.size()):
-					if result[i].size() > best.size():
+					var area = abs(BuildingPlannerUtils.signed_area(result[i]))
+					if area > best_area:
 						best = result[i]
-				out = Array(best)
-		2: # Inset — shrink inward
-			var result = Geometry.offset_polygon_2d(PoolVector2Array(polygon), -active_width)
-			if result.empty():
-				if LOGGER: LOGGER.warn("%s: Inset offset returned empty; using plain polygon." % CLASS_NAME)
-				out = polygon.duplicate()
-			else:
-				var best: PoolVector2Array = result[0]
-				for i in range(1, result.size()):
-					if result[i].size() > best.size():
-						best = result[i]
-				out = Array(best)
+						best_area = area
+				out = BuildingPlannerUtils.sanitize_polygon(best)
 		_: # Ridge (mode 0) — polygon as-is
 			out = polygon.duplicate()
 
@@ -208,26 +169,3 @@ func _build_roof_polygon(polygon: Array) -> Array:
 		out.append(out[1])
 
 	return out
-
-## Safely removes [roof] from the scene tree and frees it.
-func _free_roof(roof) -> void:
-	if roof == null or not is_instance_valid(roof):
-		return
-	var p = roof.get_parent()
-	if p:
-		p.remove_child(roof)
-	roof.queue_free()
-
-# ============================================================================
-# HISTORY HELPERS
-# ============================================================================
-
-## Records [record] into the HistoryApi (undo/redo stack) if available.
-func _record_history(record) -> void:
-	if not _parent_mod:
-		return
-	var api = _parent_mod.Global.API
-	if api and api.has("HistoryApi"):
-		api.HistoryApi.record(record, 100)
-	elif LOGGER:
-		LOGGER.warn("%s: HistoryApi not available — action will not be undoable." % CLASS_NAME)

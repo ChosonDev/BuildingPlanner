@@ -1,0 +1,89 @@
+{
+  "roots": [
+    "scripts"
+  ],
+  "root_scripts": true,
+  "injected_globals": [
+    "BuildingPlanner.gd"
+  ],
+  "entry_contract": {
+    "BuildingPlanner.gd": "tool"
+  },
+  "manifest": "BuildingPlanner.ddmod",
+  "required_resources": [
+    "icons/BuildingPlanner_Icon_no_outline_32x32.png"
+  ],
+  "load_only": {},
+  "construct": [
+    {
+      "path": "BuildingPlanner.gd",
+      "args": []
+    },
+    {
+      "path": "scripts/features/MarkerObjectRegistry.gd",
+      "args": [
+        null
+      ]
+    },
+    {
+      "path": "scripts/features/PathBuilder.gd",
+      "args": [
+        null,
+        null
+      ]
+    },
+    {
+      "path": "scripts/features/PatternFill.gd",
+      "args": [
+        null,
+        null
+      ]
+    },
+    {
+      "path": "scripts/features/RoofBuilder.gd",
+      "args": [
+        null,
+        null
+      ]
+    },
+    {
+      "path": "scripts/features/RoomBuilder.gd",
+      "args": [
+        null,
+        null
+      ]
+    },
+    {
+      "path": "scripts/features/WallBuilder.gd",
+      "args": [
+        null,
+        null
+      ]
+    },
+    {
+      "path": "scripts/overlay/BuildingPlannerOverlay.gd",
+      "args": []
+    },
+    {
+      "path": "scripts/tool/BuildingPlannerHistory.gd",
+      "args": []
+    },
+    {
+      "path": "scripts/tool/BuildingPlannerTool.gd",
+      "args": [
+        null
+      ]
+    },
+    {
+      "path": "scripts/tool/BuildingPlannerToolUI.gd",
+      "args": [
+        null,
+        null
+      ]
+    },
+    {
+      "path": "scripts/utils/BuildingPlannerUtils.gd",
+      "args": []
+    }
+  ]
+}
