@@ -55,6 +55,7 @@ class SearchableGrid:
 	var _search_edit    = null   # LineEdit
 	var _grid_menu      = null   # ItemList
 	var _scroll         = null   # ScrollContainer
+	var _editor         = null   # Host Editor supplied by the owning mod.
 
 	# ---- data ----
 	var _all_items:     Array = []   # Array of { icon, tooltip, modulate }
@@ -208,12 +209,12 @@ class SearchableGrid:
 			_search_edit.release_focus()
 
 	func _on_focus_entered() -> void:
-		if Engine.has_singleton("Global"):
-			Engine.get_singleton("Global").Editor.SearchHasFocus = true
+		if is_instance_valid(_editor):
+			_editor.SearchHasFocus = true
 
 	func _on_focus_exited() -> void:
-		if Engine.has_singleton("Global"):
-			Engine.get_singleton("Global").Editor.SearchHasFocus = false
+		if is_instance_valid(_editor):
+			_editor.SearchHasFocus = false
 
 # ============================================================================
 # PATTERN PANEL
@@ -872,6 +873,7 @@ func build(panel):
 		return
 
 	# ---- Create panel instances ----
+	panel.rect_min_size.x += 50
 	_pf_pattern_panel = PatternPanel.new()
 	_wb_wall_panel    = WallPanel.new( _tool.parent_mod.get("Script"))
 	_pb_path_panel    = PathPanel.new( _tool.parent_mod.get("Script"))
@@ -931,6 +933,9 @@ func build(panel):
 
 	_rf_section = _rf_roof_panel.build()
 	root.add_child(_rf_section)
+
+	for section in _all_panels:
+		section._sg._editor = _tool.parent_mod.Global.get("Editor")
 
 	# Show only the first mode's section
 	_show_section(Mode.PATTERN_FILL)

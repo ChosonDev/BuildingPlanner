@@ -5,6 +5,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.2.5]
+
+### Fixed
+- Suppress host shortcuts while typing in asset searches and restore them when
+  leaving the search field, switching tools, or changing maps.
+
+### Changed
+- Widen the BuildingPlanner panel by 50 pixels to fit four texture thumbnails per row.
+
 ## [1.2.4]
 
 ### Changed

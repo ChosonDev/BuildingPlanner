@@ -8,7 +8,7 @@ needed. This is the initial suite, not full feature coverage.
 
 | Field | Value |
 | --- | --- |
-| Target | `Choson.BuildingPlanner` 1.2.3, current checkout including local changes |
+| Target | `Choson.BuildingPlanner` 1.2.5, current checkout including local changes |
 | Purpose | Detect loading, geometry, registry, history and early API regressions |
 | Environment | Godot `3.4.stable.official.206ba70f4`; Python 3.8+ standard library |
 | Test dependency | GUT 7.4.3, commit `c11ba9daf49b2ec127d6113be89534dc9ee21873`, upstream `bitwes/Gut`, MIT |

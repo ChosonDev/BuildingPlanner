@@ -1,6 +1,6 @@
 # Building Planner
 
-**Version:** 1.2.3
+**Version:** 1.2.5
 **Author:** Choson  
 **Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.2.0+)
 

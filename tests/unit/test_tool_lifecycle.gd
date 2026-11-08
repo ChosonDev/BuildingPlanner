@@ -395,6 +395,8 @@ func test_room_preview_uses_click_snap_and_canvas_boundaries():
 		assert_eq(tool._room_builder.position, tool.room_position(canvas.MousePosition))
 		assert_eq(tool._room_builder.position, Vector2(10, 30))
 		assert_eq(tool._room_builder.hidden, not tool.is_mouse_on_canvas())
+	assert_false(tool.is_canvas_position(Vector2(499, 200), Vector2(1200, 800), 500), "Wider sidebar does not receive canvas actions")
+	assert_true(tool.is_canvas_position(Vector2(500, 200), Vector2(1200, 800), 500))
 	editor.IsSnapping = false
 	assert_eq(tool.room_position(canvas.MousePosition), canvas.MousePosition)
 	tool.on_canvas = false
@@ -424,8 +426,15 @@ func test_mode_switch_reads_layer_api_once_and_all_panels_share_sorted_layers():
 			assert_eq(panel.layer_option.get_item_id(i), 100 * (i + 1))
 	ui._tool = null
 
+class EditorState:
+	extends Reference
+	var Tools = {}
+	var SearchHasFocus = false
+
+
 func test_hiding_sections_and_disabling_release_only_owned_search_focus():
-	var tool = Tool.new({"Global": {"API": {}, "World": null, "Editor": {"Tools": {}}}})
+	var editor = EditorState.new()
+	var tool = Tool.new({"Global": {"API": {}, "World": null, "Editor": editor}})
 	var ui = UI.new(tool, null)
 	var panel = autofree(VBoxContainer.new())
 	add_child(panel)
@@ -434,18 +443,49 @@ func test_hiding_sections_and_disabling_release_only_owned_search_focus():
 	var search = ui._pf_pattern_panel._sg._search_edit
 	search.grab_focus()
 	assert_true(search.has_focus())
+	assert_true(editor.SearchHasFocus, "Owned search focus suppresses host shortcuts")
 	ui._show_section(tool.Mode.WALL_BUILDER)
 	assert_false(search.has_focus())
+	assert_false(editor.SearchHasFocus, "Changing modes restores host shortcuts")
+	ui._show_section(tool.Mode.ROOM_BUILDER)
+	ui._rb_pattern_panel._sg._search_edit.grab_focus()
+	ui._rb_wall_panel._sg._search_edit.grab_focus()
+	assert_true(editor.SearchHasFocus, "Moving between searches keeps shortcuts suppressed")
 	ui._show_section(tool.Mode.PATTERN_FILL)
 	search.grab_focus()
 	assert_true(search.has_focus())
 	tool.Disable()
 	assert_false(search.has_focus())
+	assert_false(editor.SearchHasFocus, "Disabling the tool restores host shortcuts")
 	var unrelated = autofree(LineEdit.new())
 	add_child(unrelated)
 	unrelated.grab_focus()
+	editor.SearchHasFocus = true
 	tool.Disable()
 	assert_true(unrelated.has_focus(), "Other tools keep ownership of their focus")
+	assert_true(editor.SearchHasFocus, "Other tools keep ownership of shortcut suppression")
+	tool.shutdown()
+	assert_true(editor.SearchHasFocus, "Unloading does not reset another tool's suppression")
+
+
+func test_all_searches_suppress_shortcuts_and_release_on_map_change():
+	var editor = EditorState.new()
+	var tool = Tool.new({"Global": {"API": {}, "World": null, "Editor": editor}})
+	var ui = UI.new(tool, null)
+	var panel = autofree(VBoxContainer.new())
+	add_child(panel)
+	ui.build(panel)
+	tool._ui = ui
+	for section in ui._all_panels:
+		# Exercise every search independently of section visibility.
+		section._sg._search_edit.emit_signal("focus_entered")
+		assert_true(editor.SearchHasFocus)
+		section._sg._search_edit.emit_signal("focus_exited")
+		assert_false(editor.SearchHasFocus)
+	ui._pf_pattern_panel._sg._search_edit.grab_focus()
+	assert_true(editor.SearchHasFocus)
+	ui.release_all_grid_menus()
+	assert_false(editor.SearchHasFocus, "Map changes restore host shortcuts")
 	tool.shutdown()
 
 
@@ -514,13 +554,16 @@ func test_entry_toolbar_failure_disconnects_partial_tool_and_retries_cleanly():
 	assert_false(entry._tool_created)
 	assert_eq(api.get_signal_connection_list("api_registered").size(), 0, "Failed tool must release API subscription")
 	toolbar.panel = autofree(VBoxContainer.new())
+	toolbar.panel.rect_min_size.x = 244
 	entry.update(0)
+	assert_eq(toolbar.panel.rect_min_size.x, 294.0, "Only the mod panel gains 50 pixels")
 	assert_eq(toolbar.attempts, 2)
 	assert_true(entry._tool_created)
 	assert_true(entry._tool._ui != null)
 	assert_eq(api.get_signal_connection_list("api_registered").size(), 1)
 	entry.update(0)
 	assert_eq(toolbar.attempts, 2, "A successful toolbar is never created twice")
+	assert_eq(toolbar.panel.rect_min_size.x, 294.0, "Updates do not accumulate panel width")
 	entry.unload()
 	assert_eq(api.get_signal_connection_list("api_registered").size(), 0)
 	entry.BuildingPlannerToolClass = null

@@ -196,10 +196,11 @@ func is_mouse_on_canvas() -> bool:
 	if not is_instance_valid(cached_worldui) or not cached_worldui.IsInsideBounds:
 		return false
 	var viewport = cached_worldui.get_viewport()
-	return is_canvas_position(viewport.get_mouse_position(), viewport.size)
+	var sidebar_right = max(450.0, tool_panel.get_global_rect().end.x) if is_instance_valid(tool_panel) else 450.0
+	return is_canvas_position(viewport.get_mouse_position(), viewport.size, sidebar_right)
 
-static func is_canvas_position(mouse: Vector2, viewport_size: Vector2) -> bool:
-	return mouse.x >= 450 and mouse.y >= 100 and mouse.y <= viewport_size.y - 100
+static func is_canvas_position(mouse: Vector2, viewport_size: Vector2, sidebar_right: float = 450.0) -> bool:
+	return mouse.x >= sidebar_right and mouse.y >= 100 and mouse.y <= viewport_size.y - 100
 
 func room_position(position: Vector2) -> Vector2:
 	if parent_mod.Global.Editor.IsSnapping:
