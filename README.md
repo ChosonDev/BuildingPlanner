@@ -1,6 +1,6 @@
 # Building Planner
 
-**Version:** 1.2.7
+**Version:** 1.2.8
 **Author:** Choson  
 **Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.4.5+)
 
@@ -42,6 +42,7 @@ Configurable settings in the sidebar:
 | Shadow | Toggle wall shadow |
 | Bevel corners | Toggle between Sharp and Bevel joints |
 | Offset (px) | Wall centerline offset: 0 by default, positive outward, negative inward (-8192 to 8192 pixels) |
+| Reverse direction | Off by default; reverse traversal after offset to swap asymmetric texture sides |
 
 Offset applies to closed Shape and Path outlines in Wall Builder, Path Builder
 and both Room Builder outline modes. Room floors and GuidesLines markers keep
@@ -52,6 +53,13 @@ Open Paths/Lines require 0. A nonzero offset that collapses the contour or produ
 multiple contours (including holes) cancels placement with a log message; room
 placement rolls back as one operation. The room cursor preview shows the source
 footprint, not the offset outline.
+
+Reverse direction works with open and closed Path markers, Shape contours and
+both Room Builder outlines. It reverses a copy after offset: open paths run from
+end to start; closed contours keep their starting vertex to preserve the texture
+seam. Source markers and room floors stay unchanged. Room style snapshots retain
+the flag through boolean rebuilds and undo/redo. Path fade and taper options
+follow the new traversal direction.
 
 ---
 
@@ -70,6 +78,7 @@ Configurable settings in the sidebar:
 | Color | ColorPicker — modulates the path texture tint *(requires ColourAndModifyThings; disabled otherwise)* |
 | Width | Path width scale (0.1–10.0) |
 | Offset (px) | Centerline offset: 0 by default, positive outward, negative inward (-8192 to 8192 pixels); closed outlines only |
+| Reverse direction | Off by default; reverse traversal after offset, keeping the start vertex on closed outlines |
 | Smoothness | Bezier smoothing intensity (0.0–1.0 slider) |
 | Layer | Current map's user layers from LayerApi (default: 100, User Layer 1) |
 | Sorting | Over / Under (render order) |
@@ -199,7 +208,7 @@ clipped polygons. Acts as a no-op when no existing markers overlap the click pos
 Optional: **Lievven.Snappy_Mod** — detected automatically; no configuration needed.  
 Optional: **[ColourAndModifyThings](https://github.com/Uchideshi/ColourAndModifyThings)** — enables path color picker in Path Builder and Room Builder (color persists across map reloads).
 
-BuildingPlanner 1.2.7 requires GuidesLines 2.4.5 or later, including its template,
+BuildingPlanner 1.2.8 requires GuidesLines 2.4.5 or later, including its template,
 geometry and history-capture APIs. Dungeondraft's manifest dependency list records
 mod IDs only; install the required GuidesLines version separately. Missing API
 capabilities disable the affected preview and placement before changing the map.

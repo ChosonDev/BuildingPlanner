@@ -35,6 +35,7 @@ var active_color:  Color = Color.white
 var active_shadow: bool = true
 var active_joint:  int  = 1    # 0 = Sharp, 1 = Bevel, 2 = Round
 var active_offset: float = 0.0 # World pixels; positive outward, negative inward.
+var active_reverse_direction: bool = false
 
 # ============================================================================
 # INIT
@@ -70,6 +71,7 @@ func get_settings() -> Dictionary:
 		"active_shadow": active_shadow,
 		"active_joint": active_joint,
 		"active_offset": active_offset,
+		"active_reverse_direction": active_reverse_direction,
 	}
 
 ## Explicit saved settings leave the live UI selection untouched.
@@ -79,6 +81,8 @@ func _create_wall(polygon: Array, level = null, closed: bool = true, settings = 
 	polygon = BuildingPlannerUtils.offset_outline(polygon, closed, settings.get("active_offset", 0.0), LOGGER)
 	if polygon.empty():
 		return null
+	if settings.get("active_reverse_direction", false):
+		polygon = BuildingPlannerUtils.reverse_outline(polygon, closed)
 	# --- Dungeondraft context ---
 	level = BuildingPlannerUtils.resolve_level(_parent_mod, level)
 	if not level:

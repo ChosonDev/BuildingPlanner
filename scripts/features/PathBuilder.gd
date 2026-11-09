@@ -34,6 +34,7 @@ var active_texture = null
 var active_color:      Color = Color.white
 var active_width:      float = 1.0          # path width
 var active_offset:     float = 0.0          # World pixels; positive outward, negative inward.
+var active_reverse_direction: bool = false
 var active_smoothness: float = 0.0          # smoothness (0.0 - 1.0)
 var active_layer:      int   = BuildingPlannerUtils.DEFAULT_LAYER          # layer z_index — 100 = User Layer 1
 var active_sorting:    int   = 0            # 0 = Over, 1 = Under
@@ -76,6 +77,7 @@ func get_settings() -> Dictionary:
 		"active_color": active_color,
 		"active_width": active_width,
 		"active_offset": active_offset,
+		"active_reverse_direction": active_reverse_direction,
 		"active_smoothness": active_smoothness,
 		"active_layer": active_layer,
 		"active_sorting": active_sorting,
@@ -93,6 +95,8 @@ func _create_path(polygon: Array, level = null, closed: bool = true, settings = 
 	polygon = BuildingPlannerUtils.offset_outline(polygon, closed, settings.get("active_offset", 0.0), LOGGER)
 	if polygon.empty():
 		return null
+	if settings.get("active_reverse_direction", false):
+		polygon = BuildingPlannerUtils.reverse_outline(polygon, closed)
 	# --- Access Pathways for path creation ---
 	level = BuildingPlannerUtils.resolve_level(_parent_mod, level)
 	if not level:

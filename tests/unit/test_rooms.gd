@@ -732,9 +732,11 @@ func test_boolean_cuts_preserve_room_style_and_outline_across_undo_redo():
 			room._wall_builder.active_color = Color.green
 			room._wall_builder.active_joint = 0
 			room._wall_builder.active_offset = -2.0
+			room._wall_builder.active_reverse_direction = true
 			room._path_builder.active_color = Color.green
 			room._path_builder.active_width = 2.5
 			room._path_builder.active_offset = -2.0
+			room._path_builder.active_reverse_direction = true
 			assert_true(room.build_room_at(Vector2.ZERO, {"active_shape_radius": 1.0, "active_shape_angle": 0.0, "active_shape_sides": 6, "ready": true, "active_marker_type": "Shape"}))
 			var original_settings = room._registry.get_settings(1)
 			# A different room style in the UI must not repaint the dented neighbor.
@@ -744,14 +746,17 @@ func test_boolean_cuts_preserve_room_style_and_outline_across_undo_redo():
 			room._pattern_fill.active_rotation = 90
 			room._wall_builder.active_color = Color.blue
 			room._wall_builder.active_offset = 12.0
+			room._wall_builder.active_reverse_direction = false
 			room._path_builder.active_color = Color.blue
 			room._path_builder.active_offset = 12.0
+			room._path_builder.active_reverse_direction = false
 			room.active_sub_mode = mode
 			assert_true(room.build_room_at(Vector2.ZERO, {"active_shape_radius": 1.0, "active_shape_angle": 0.0, "active_shape_sides": 6, "ready": true, "active_marker_type": "Shape"}))
 			var action = records.back()
 			for _cycle in range(3):
 				var entry = room._registry.get_entry(1)
 				assert_eq_deep(entry.settings, original_settings)
+				assert_true(entry.settings.outline.active_reverse_direction)
 				assert_eq(entry.fills[0].Save().color, Color.red.to_html())
 				assert_eq(entry.fills[0].Save().layer, 300)
 				assert_eq(entry.fills[0].Save().rotation, deg2rad(45))
@@ -765,6 +770,7 @@ func test_boolean_cuts_preserve_room_style_and_outline_across_undo_redo():
 					points.pop_back()
 					for i in range(points.size()): points[i] += str2var(data.position)
 					var expected = room._path_builder.BuildingPlannerUtils.offset_outline(TRIANGLE, true, -2.0)
+					expected = [expected[0], expected[2], expected[1]]
 					assert_eq(points.size(), expected.size())
 					for i in range(points.size()):
 						assert_true(points[i].distance_to(expected[i]) < 0.001, "Native var2str rounds coordinates")
@@ -772,7 +778,8 @@ func test_boolean_cuts_preserve_room_style_and_outline_across_undo_redo():
 					assert_eq(entry.walls[0].Save().color, Color.green)
 					assert_eq(entry.walls[0].Save().joint, 0)
 					assert_eq(entry.settings.outline.active_offset, -2.0)
-					assert_eq_deep(entry.walls[0].Save().points, room._wall_builder.BuildingPlannerUtils.offset_outline(TRIANGLE, true, -2.0))
+					var expected = room._wall_builder.BuildingPlannerUtils.offset_outline(TRIANGLE, true, -2.0)
+					assert_eq_deep(entry.walls[0].Save().points, [expected[0], expected[2], expected[1]])
 				action.undo()
 				action.redo()
 			assert_eq(room._pattern_fill.active_color, Color.blue, "Neighbor replay leaves current UI choices intact")

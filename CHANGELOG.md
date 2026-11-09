@@ -5,6 +5,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.2.8] — 2026-11-09
+
+### Added
+- Reverse direction in Wall and Path panels, including both Room Builder outlines.
+  Traversal reverses after offset without modifying markers; closed contours keep
+  their starting vertex. Room style snapshots retain the flag during rebuilds.
+
 ## [1.2.7] — 2026-11-09
 
 ### Added

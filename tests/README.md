@@ -8,7 +8,7 @@ needed. This is the initial suite, not full feature coverage.
 
 | Field | Value |
 | --- | --- |
-| Target | `Choson.BuildingPlanner` 1.2.7, current checkout including local changes |
+| Target | `Choson.BuildingPlanner` 1.2.8, current checkout including local changes |
 | Purpose | Detect loading, geometry, registry, history and early API regressions |
 | Environment | Godot `3.4.stable.official.206ba70f4`; Python 3.8+ standard library |
 | Test dependency | GUT 7.4.3, commit `c11ba9daf49b2ec127d6113be89534dc9ee21873`, upstream `bitwes/Gut`, MIT |
@@ -52,6 +52,16 @@ runtime error following a passing assertion. Missing or malformed reports,
 incomplete selection, skipped or assertion-free cases and engine errors fail.
 
 ## Coverage
+
+Reverse direction checks cover copied open/closed contours and explicit seams,
+default and independent late UI binding, post-offset wall/path geometry, legacy
+settings, undo/redo and retained room styles after boolean cuts. Run the focused
+checks with `python -X utf8 Mods/BuildingPlanner/tests/run.py --test reverse_direction`.
+The boolean room cases run with `--test boolean_cuts` or the full suite.
+Full suite verified for this change: 122 tests / 2163 assertions passed on Godot 3.4.
+The user confirmed Reverse direction works in Dungeondraft on 2026-11-09.
+The exact host validation steps were not recorded; the scratch-map checklist
+below remains available for future regressions.
 
 Wall/path offset checks cover signed pixel bounds, winding, translated and concave
 contours, rejected collapse/split/open outlines, independent late panel binding,

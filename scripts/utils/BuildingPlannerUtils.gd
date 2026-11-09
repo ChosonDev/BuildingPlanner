@@ -14,6 +14,14 @@ const CLASS_NAME = "BuildingPlannerUtils"
 ## from the current map.
 const DEFAULT_LAYER: int = 100
 
+## Reverse a copy, keeping the closed contour's first vertex and explicit seam.
+static func reverse_outline(points: Array, closed: bool) -> Array:
+	var result = points.duplicate()
+	result.invert()
+	if closed and result.size() > 1 and points[0] != points[-1]:
+		result.push_front(result.pop_back())
+	return result
+
 ## Offset wall/path centerlines only; room floors and source markers stay unchanged.
 static func offset_outline(points: Array, closed: bool, distance, logger = null) -> Array:
 	if (typeof(distance) != TYPE_INT and typeof(distance) != TYPE_REAL) or is_nan(distance) or is_inf(distance) or abs(distance) > 8192.0:
