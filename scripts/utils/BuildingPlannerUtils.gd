@@ -14,6 +14,36 @@ const CLASS_NAME = "BuildingPlannerUtils"
 ## from the current map.
 const DEFAULT_LAYER: int = 100
 
+## Offset wall/path centerlines only; room floors and source markers stay unchanged.
+static func offset_outline(points: Array, closed: bool, distance, logger = null) -> Array:
+	if (typeof(distance) != TYPE_INT and typeof(distance) != TYPE_REAL) or is_nan(distance) or is_inf(distance) or abs(distance) > 8192.0:
+		if logger: logger.error("BuildingPlanner: offset must be finite and within -8192..8192 pixels.")
+		return []
+	if distance == 0.0:
+		return points.duplicate() # Preserve existing open/crossing Path behavior at zero.
+	if not closed:
+		if logger: logger.error("BuildingPlanner: nonzero offset requires a closed outline; use 0 for open Paths or Lines.")
+		return []
+	var polygon = sanitize_polygon(points)
+	if polygon.empty():
+		if logger: logger.error("BuildingPlanner: offset requires a nondegenerate polygon.")
+		return []
+	var reversed = signed_area(polygon) < 0
+	if reversed:
+		polygon.invert()
+	var contours = Geometry.offset_polygon_2d(PoolVector2Array(polygon), distance, Geometry.JOIN_MITER)
+	# ponytail: one node per outline; support multiple nodes in callers/history before allowing split contours or holes.
+	if contours.size() != 1:
+		if logger: logger.error("BuildingPlanner: offset collapses or splits the outline; choose a smaller offset or 0.")
+		return []
+	var result = sanitize_polygon(contours[0])
+	if result.empty():
+		if logger: logger.error("BuildingPlanner: offset produced invalid geometry.")
+		return []
+	if (signed_area(result) < 0) != reversed:
+		result.invert()
+	return result
+
 ## Prefer a nearby Path marker; older APIs keep the existing Shape fill behavior.
 static func resolve_outline(api, coords: Vector2, logger = null) -> Dictionary:
 	if not api or (api.has_method("is_ready") and not api.is_ready()):

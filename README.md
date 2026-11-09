@@ -1,6 +1,6 @@
 # Building Planner
 
-**Version:** 1.2.6
+**Version:** 1.2.7
 **Author:** Choson  
 **Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.4.5+)
 
@@ -41,6 +41,17 @@ Configurable settings in the sidebar:
 | Color | ColorPicker — pre-filled with the style's default color |
 | Shadow | Toggle wall shadow |
 | Bevel corners | Toggle between Sharp and Bevel joints |
+| Offset (px) | Wall centerline offset: 0 by default, positive outward, negative inward (-8192 to 8192 pixels) |
+
+Offset applies to closed Shape and Path outlines in Wall Builder, Path Builder
+and both Room Builder outline modes. Room floors and GuidesLines markers keep
+their original footprint; wall texture thickness and path width stay unchanged.
+Settings affect newly built outlines.
+Existing rooms retain their saved offset when boolean operations rebuild them.
+Open Paths/Lines require 0. A nonzero offset that collapses the contour or produces
+multiple contours (including holes) cancels placement with a log message; room
+placement rolls back as one operation. The room cursor preview shows the source
+footprint, not the offset outline.
 
 ---
 
@@ -58,6 +69,7 @@ Configurable settings in the sidebar:
 | Path texture | Scrollable grid of all installed path textures (sourced from PathTool) |
 | Color | ColorPicker — modulates the path texture tint *(requires ColourAndModifyThings; disabled otherwise)* |
 | Width | Path width scale (0.1–10.0) |
+| Offset (px) | Centerline offset: 0 by default, positive outward, negative inward (-8192 to 8192 pixels); closed outlines only |
 | Smoothness | Bezier smoothing intensity (0.0–1.0 slider) |
 | Layer | Current map's user layers from LayerApi (default: 100, User Layer 1) |
 | Sorting | Over / Under (render order) |
@@ -187,7 +199,7 @@ clipped polygons. Acts as a no-op when no existing markers overlap the click pos
 Optional: **Lievven.Snappy_Mod** — detected automatically; no configuration needed.  
 Optional: **[ColourAndModifyThings](https://github.com/Uchideshi/ColourAndModifyThings)** — enables path color picker in Path Builder and Room Builder (color persists across map reloads).
 
-BuildingPlanner 1.2.6 requires GuidesLines 2.4.5 or later, including its template,
+BuildingPlanner 1.2.7 requires GuidesLines 2.4.5 or later, including its template,
 geometry and history-capture APIs. Dungeondraft's manifest dependency list records
 mod IDs only; install the required GuidesLines version separately. Missing API
 capabilities disable the affected preview and placement before changing the map.

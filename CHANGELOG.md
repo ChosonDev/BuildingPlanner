@@ -5,6 +5,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.2.7] — 2026-11-09
+
+### Added
+- Wall Builder, Path Builder and both Room Builder outlines now support a signed
+  pixel offset: 0 follows the source contour, positive moves outward, negative inward.
+- Offset moves closed outlines without changing wall thickness, path width or room
+  floors. Room rebuilds retain saved offsets; undo/redo restores placed geometry.
+
 ## [1.2.6] — 2026-11-09
 
 ### Dependencies
@@ -18,12 +26,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   action, including all Shape boolean modes and full rollback on partial failure.
 - Closed Path templates receive fill and outline; open Paths and Line guides
   receive the selected open Wall/Path outline.
-
-### Validation
-- Integration checks execute the authored GuidesLines API with Room Builder for
-  transforms, all boolean modes, mixed groups, native creation failures and replay.
-- All 111 standalone tests pass (1845 assertions).
-- User reported the current changes working in Dungeondraft on 2026-11-09.
 
 ## [1.2.5]
 

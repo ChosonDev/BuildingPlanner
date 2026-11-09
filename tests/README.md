@@ -8,7 +8,7 @@ needed. This is the initial suite, not full feature coverage.
 
 | Field | Value |
 | --- | --- |
-| Target | `Choson.BuildingPlanner` 1.2.6, current checkout including local changes |
+| Target | `Choson.BuildingPlanner` 1.2.7, current checkout including local changes |
 | Purpose | Detect loading, geometry, registry, history and early API regressions |
 | Environment | Godot `3.4.stable.official.206ba70f4`; Python 3.8+ standard library |
 | Test dependency | GUT 7.4.3, commit `c11ba9daf49b2ec127d6113be89534dc9ee21873`, upstream `bitwes/Gut`, MIT |
@@ -52,6 +52,16 @@ runtime error following a passing assertion. Missing or malformed reports,
 incomplete selection, skipped or assertion-free cases and engine errors fail.
 
 ## Coverage
+
+Wall/path offset checks cover signed pixel bounds, winding, translated and concave
+contours, rejected collapse/split/open outlines, independent late panel binding,
+standalone undo/redo, unchanged room floors, room rollback and retained offsets
+when boolean edits rebuild existing rooms. Run the focused checks with
+`python -X utf8 Mods/BuildingPlanner/tests/run.py --test offset`.
+Path checks also cover unchanged width and native local/world coordinates.
+Full suite verified on 2026-11-09: 119 tests / 2028 assertions passed on Godot 3.4.
+Native offset wall/path rendering, save/reopen and map/tool switching still require
+the Dungeondraft scratch-map workflow below.
 
 The suite covers runtime smoke checks, geometry, native creation collaborators,
 compound room history, independent textures and tool lifecycle regressions.

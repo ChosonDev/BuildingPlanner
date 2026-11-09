@@ -731,8 +731,10 @@ func test_boolean_cuts_preserve_room_style_and_outline_across_undo_redo():
 			room._pattern_fill.active_rotation = 45
 			room._wall_builder.active_color = Color.green
 			room._wall_builder.active_joint = 0
+			room._wall_builder.active_offset = -2.0
 			room._path_builder.active_color = Color.green
 			room._path_builder.active_width = 2.5
+			room._path_builder.active_offset = -2.0
 			assert_true(room.build_room_at(Vector2.ZERO, {"active_shape_radius": 1.0, "active_shape_angle": 0.0, "active_shape_sides": 6, "ready": true, "active_marker_type": "Shape"}))
 			var original_settings = room._registry.get_settings(1)
 			# A different room style in the UI must not repaint the dented neighbor.
@@ -741,7 +743,9 @@ func test_boolean_cuts_preserve_room_style_and_outline_across_undo_redo():
 			room._pattern_fill.active_layer = 100
 			room._pattern_fill.active_rotation = 90
 			room._wall_builder.active_color = Color.blue
+			room._wall_builder.active_offset = 12.0
 			room._path_builder.active_color = Color.blue
+			room._path_builder.active_offset = 12.0
 			room.active_sub_mode = mode
 			assert_true(room.build_room_at(Vector2.ZERO, {"active_shape_radius": 1.0, "active_shape_angle": 0.0, "active_shape_sides": 6, "ready": true, "active_marker_type": "Shape"}))
 			var action = records.back()
@@ -755,9 +759,20 @@ func test_boolean_cuts_preserve_room_style_and_outline_across_undo_redo():
 				if outline == 1:
 					assert_eq(entry.walls[0].modulate, Color.green)
 					assert_eq(entry.walls[0].Save().width, original_settings.outline.active_texture.get_height() * 2.5)
+					assert_eq(entry.settings.outline.active_offset, -2.0)
+					var data = entry.walls[0].Save()
+					var points = Array(str2var(data.edit_points))
+					points.pop_back()
+					for i in range(points.size()): points[i] += str2var(data.position)
+					var expected = room._path_builder.BuildingPlannerUtils.offset_outline(TRIANGLE, true, -2.0)
+					assert_eq(points.size(), expected.size())
+					for i in range(points.size()):
+						assert_true(points[i].distance_to(expected[i]) < 0.001, "Native var2str rounds coordinates")
 				else:
 					assert_eq(entry.walls[0].Save().color, Color.green)
 					assert_eq(entry.walls[0].Save().joint, 0)
+					assert_eq(entry.settings.outline.active_offset, -2.0)
+					assert_eq_deep(entry.walls[0].Save().points, room._wall_builder.BuildingPlannerUtils.offset_outline(TRIANGLE, true, -2.0))
 				action.undo()
 				action.redo()
 			assert_eq(room._pattern_fill.active_color, Color.blue, "Neighbor replay leaves current UI choices intact")
@@ -774,6 +789,59 @@ class DiagnosticLogger:
 	var errors = []
 	func error(message):
 		errors.append(message)
+
+
+func test_room_wall_offset_keeps_floor_and_rolls_back_a_collapsed_inset():
+	var room = make_room(Room.SubMode.SINGLE)
+	var level = room._parent_mod.Global.World.Level
+	room._pattern_fill.active_texture = GradientTexture.new()
+	room._wall_builder.active_offset = -2.0
+	var state = {"ready": true, "active_shape_radius": 1.0, "active_shape_angle": 0.0, "active_shape_sides": 6}
+	assert_true(room.build_room_at(Vector2.ZERO, state))
+	assert_eq_deep(Array(str2var(level.PatternShapes.get_child(2).Save().points)), TRIANGLE)
+	var points = level.Walls.get_child(2).Save().points
+	assert_eq_deep(points, room._wall_builder.BuildingPlannerUtils.offset_outline(TRIANGLE, true, -2.0))
+	assert_eq(records.size(), 1)
+	var action = records.back()
+	action.undo()
+	assert_eq(level.Walls.get_child_count(), 2)
+	assert_eq(level.PatternShapes.get_child_count(), 2)
+	action.redo()
+	assert_eq_deep(level.Walls.get_child(2).Save().points, points)
+	var markers_before = room._gl_api.markers.duplicate(true)
+	room._wall_builder.active_offset = -100.0
+	assert_false(room.build_room_at(Vector2.ZERO, state))
+	assert_eq(level.Walls.get_child_count(), 3)
+	assert_eq(level.PatternShapes.get_child_count(), 3)
+	assert_eq_deep(room._gl_api.markers, markers_before)
+	assert_eq(records.size(), 1, "Failed inset creates no history entry")
+	yield(get_tree(), "idle_frame")
+
+
+func test_room_path_offset_keeps_floor_and_rolls_back_collapsed_inset():
+	var room = make_room(Room.SubMode.SINGLE)
+	var level = room._parent_mod.Global.World.Level
+	level.Pathways = autofree(load("res://unit/test_path_creation.gd").Pathways.new())
+	room.active_outline_mode = Room.OutlineMode.PATH
+	room._pattern_fill.active_texture = GradientTexture.new()
+	room._path_builder.active_offset = 10.0
+	var state = {"ready": true, "active_shape_radius": 1.0, "active_shape_angle": 0.0, "active_shape_sides": 6}
+	assert_true(room.build_room_at(Vector2.ZERO, state))
+	assert_eq_deep(Array(str2var(level.PatternShapes.get_child(2).Save().points)), TRIANGLE)
+	var saved = level.Pathways.get_child(0).Save(false)
+	var action = records.back()
+	action.undo()
+	assert_eq(level.Pathways.get_child_count(), 0)
+	action.redo()
+	assert_eq_deep(level.Pathways.get_child(0).Save(false), saved)
+	var before = room._gl_api.markers.duplicate(true)
+	room._path_builder.active_offset = -100.0
+	assert_false(room.build_room_at(Vector2.ZERO, state))
+	assert_eq(level.Pathways.get_child_count(), 1)
+	assert_eq(level.PatternShapes.get_child_count(), 3)
+	assert_eq_deep(room._gl_api.markers, before)
+	assert_eq(records.size(), 1)
+	yield(get_tree(), "idle_frame")
 
 
 func test_rejected_capture_and_mismatched_shape_log_errors_without_committing():

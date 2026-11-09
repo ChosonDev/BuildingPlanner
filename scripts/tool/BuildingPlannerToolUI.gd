@@ -534,6 +534,7 @@ class WallPanel:
 
 	var shadow_check = null   # CheckButton
 	var bevel_check  = null   # CheckButton
+	var offset_spin  = null   # SpinBox
 
 	func _init(asset_script = null):
 		_asset_script = asset_script
@@ -552,6 +553,8 @@ class WallPanel:
 		color_picker = _add_color_picker(sec)
 
 		sec.add_child(_spacer(4))
+		offset_spin = _add_range(sec, "Offset (px):", "offset", -8192.0, 8192.0, 1.0, 0.0)
+		offset_spin.hint_tooltip = "Closed outlines: + outward, - inward. Moves the wall, not its texture width. Open Paths/Lines require 0."
 
 		shadow_check = _add_check(sec, "Shadow", "shadow", true)
 
@@ -593,6 +596,7 @@ class PathPanel:
 	# ---- UI nodes ----
 
 	var width_spin        = null   # SpinBox
+	var offset_spin       = null   # SpinBox
 	var smoothness_slider = null   # HSlider
 	var sorting_option    = null   # OptionButton
 
@@ -620,6 +624,8 @@ class PathPanel:
 		color_picker = _add_color_picker(sec)
 
 		width_spin = _add_range(sec, "Width:", "width", 0.1, 10.0, 0.1, 1.0)
+		offset_spin = _add_range(sec, "Offset (px):", "offset", -8192.0, 8192.0, 1.0, 0.0)
+		offset_spin.hint_tooltip = "Closed outlines: + outward, - inward. Moves the path, not its width. Open Paths/Lines require 0."
 
 		smoothness_slider = _add_range(sec, "Smoothness:", "smoothness", 0.0, 1.0, 0.01, 0.0, true)
 
