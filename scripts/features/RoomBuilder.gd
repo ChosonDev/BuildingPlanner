@@ -10,8 +10,7 @@ extends Reference
 #   4. Keep persistent markers, or delete the temporary Single marker.
 #   5. Record marker edits and native objects as one undo/redo entry.
 #
-# While active, set_shape_preview() is called every frame to render a live
-# preview polygon that mirrors the current GuidesLines Shape parameters.
+# While active, the public Shape or Template preview is refreshed each frame.
 # BuildingPlannerTool refreshes the public GuidesLines state during preview and placement.
 
 const CLASS_NAME = "RoomBuilder"
@@ -36,6 +35,7 @@ var _preview_active = false
 var _shape_parameters = [0.0, 0.0, 0]
 var _supported_modes = []
 var _supports_preview = false
+var _supports_templates = false
 const SUB_MODE_METHODS = ["place_shape_marker_plain", "place_shape_merge", "place_shape_conforming", "place_shape_wrapping", "apply_shape_difference"]
 const REQUIRED_API_METHODS = ["delete_marker", "is_ready", "begin_history_capture", "end_history_capture"]
 
@@ -88,6 +88,7 @@ func _init(gl_api, logger, parent_mod = null):
 		_supported_modes[mode] = _supported_modes[mode] and gl_api.has_method("get_shape_polygon")
 	_supported_modes[1] = _supported_modes[1] and _supported_modes[0]
 	_supports_preview = gl_api != null and gl_api.has_method("set_shape_preview") and gl_api.has_method("clear_shape_preview")
+	_supports_templates = supported and gl_api.has_method("get_template_markers") and gl_api.has_method("apply_marker_geometry")
 	_pattern_fill = PatternFill.new(gl_api, logger, parent_mod)
 	_wall_builder = WallBuilder.new(gl_api, logger, parent_mod)
 	_path_builder = PathBuilder.new(gl_api, logger, parent_mod)
@@ -108,9 +109,15 @@ var active_sub_mode: int = SubMode.SINGLE
 ##
 ## Parameters:
 ##   world_pos    - MousePosition from WorldUI (world-space Vector2)
-##   state        - pre-fetched Dictionary from GuidesLinesApi.get_tool_state()
+##   state        - public placement state (legacy Shape state also supported)
 func update_preview(world_pos: Vector2, state: Dictionary) -> void:
 	if not _gl_api:
+		return
+	if state.get("active_marker_type") == "Template":
+		if not _can_build(world_pos, state, [1]) or not _gl_api.has_method("set_template_preview") or not _gl_api.has_method("clear_shape_preview"):
+			stop_preview()
+			return
+		_preview_active = _gl_api.set_template_preview(world_pos, shape_angle_offset, shape_scale_factor)
 		return
 
 	var args = _shape_args(state)
@@ -144,19 +151,37 @@ func on_map_changed() -> void:
 ## Returns true on success.
 func build_room_at(coords: Vector2, state: Dictionary) -> bool:
 	# Snapshot click arguments; API signal callbacks may refresh the preview.
-	var args = _shape_args(state).duplicate()
+	var template = state.get("active_marker_type") == "Template"
+	var args = [1] if template else _shape_args(state).duplicate()
 	if not _can_build(coords, state, args):
 		if LOGGER: LOGGER.error("RoomBuilder: placement cancelled; invalid shape settings, unsupported mode or GuidesLinesApi not ready.")
 		return false
 	if not BuildingPlannerUtils.resolve_level(_parent_mod):
 		if LOGGER: LOGGER.error("RoomBuilder: World/Level not loaded.")
 		return false
+	var batch = _template_batch(coords) if template else []
+	if template and batch.empty():
+		if LOGGER: LOGGER.error("RoomBuilder: selected template has no buildable geometry; nothing was changed.")
+		return false
 	if not _gl_api.begin_history_capture():
 		if LOGGER: LOGGER.error("RoomBuilder: GuidesLinesApi rejected begin_history_capture; room placement cancelled.")
 		return false
 	_operation = BuildingPlannerHistory.RoomBuilderRecord.new(_parent_mod, _registry)
 	_difference_noop = false
-	var success = _build_room(coords, args, state.get("active_color", null))
+	var success = true
+	if template:
+		var all_noop = true
+		for marker in batch:
+			if marker.marker_type == "Shape":
+				success = _build_room(marker.position, [], marker.color, marker)
+				all_noop = all_noop and _difference_noop
+			else:
+				success = _build_template_outline(marker)
+				all_noop = false
+			if not success: break
+		_difference_noop = all_noop
+	else:
+		success = _build_room(coords, args, state.get("active_color", null))
 	var marker_records = _gl_api.end_history_capture()
 	if success and (_difference_noop or active_sub_mode == SubMode.SINGLE):
 		marker_records = [] # Successful Single and non-overlapping Difference leave markers unchanged.
@@ -193,25 +218,67 @@ func _shape_args(state: Dictionary) -> Array:
 func _can_build(coords: Vector2, state: Dictionary, args: Array) -> bool:
 	if args.empty() or not state.get("ready", false):
 		return false
-	if active_sub_mode < 0 or active_sub_mode >= _supported_modes.size() or not _supported_modes[active_sub_mode]:
+	if is_nan(shape_scale_factor) or is_inf(shape_scale_factor) or shape_scale_factor <= 0 or is_nan(shape_angle_offset) or is_inf(shape_angle_offset):
+		return false
+	var template = state.get("active_marker_type") == "Template"
+	if template and (not _supports_templates or state.get("template_capture_mode", false)):
+		return false
+	if active_sub_mode < 0 or active_sub_mode >= _supported_modes.size() or (not template and not _supported_modes[active_sub_mode]):
 		return false
 	if active_outline_mode != OutlineMode.WALL and active_outline_mode != OutlineMode.PATH:
 		return false
 	return not (is_nan(coords.x) or is_nan(coords.y) or is_inf(coords.x) or is_inf(coords.y)) and _gl_api.is_ready()
 
-func _build_room(coords, args, color) -> bool:
+func _template_batch(coords: Vector2) -> Array:
+	var batch = _gl_api.get_template_markers(coords, -1, shape_angle_offset, shape_scale_factor)
+	if not batch is Array: return []
+	batch = batch.duplicate(true)
+	for marker in batch:
+		if not marker is Dictionary or not marker.get("position") is Vector2 or not marker.get("color") is Color: return []
+		if is_nan(marker.position.x) or is_inf(marker.position.x) or is_nan(marker.position.y) or is_inf(marker.position.y): return []
+		if marker.get("marker_type") == "Shape":
+			marker["polygon"] = BuildingPlannerUtils.sanitize_polygon(marker.get("polygon"))
+			if marker.polygon.empty(): return []
+		elif marker.get("marker_type") in ["Line", "Path"]:
+			if not marker.get("outline_points") is Array or not marker.get("closed") is bool: return []
+			var points = []
+			for point in marker.outline_points:
+				if not point is Vector2 or is_nan(point.x) or is_inf(point.x) or is_nan(point.y) or is_inf(point.y): return []
+				if points.empty() or points.back() != point: points.append(point)
+			if points.size() < 2: return []
+			marker.outline_points = BuildingPlannerUtils.sanitize_polygon(points) if marker.closed else points
+			if marker.outline_points.empty(): return []
+		else:
+			return []
+	return batch
+
+# Open guides have no floor region or boolean area; reuse the existing native
+# Wall/Path creation with closed=false. Closed Paths also receive the chosen fill.
+func _build_template_outline(marker: Dictionary) -> bool:
+	if marker.closed:
+		return _populate_marker_geometry(-1, marker.outline_points, false)
+	var level = BuildingPlannerUtils.resolve_level(_parent_mod)
+	var outline = _wall_builder._create_wall(marker.outline_points, level, false) if active_outline_mode == OutlineMode.WALL else _path_builder._create_path(marker.outline_points, level, false)
+	if not is_instance_valid(outline): return false
+	_operation._loose.walls.append(outline)
+	return true
+
+func _build_room(coords, args, color, marker: Dictionary = {}) -> bool:
 	if active_sub_mode == SubMode.SINGLE:
-		return _place_single(coords, args, color, false)
+		return _place_single(coords, args, color, false, marker)
 	var result
-	match active_sub_mode:
-		SubMode.MERGE:
-			result = _gl_api.place_shape_merge(coords, args[0], args[1], args[2])
-		SubMode.CONFORM:
-			result = _gl_api.place_shape_conforming(coords, args[0], args[1], args[2], color)
-		SubMode.WRAP:
-			result = _gl_api.place_shape_wrapping(coords, args[0], args[1], args[2], color)
-		SubMode.DIFFERENCE:
-			result = _gl_api.apply_shape_difference(coords, args[0], args[1], args[2])
+	if not marker.empty():
+		result = _gl_api.apply_marker_geometry(marker, ["Normal", "Merge", "Conform", "Wrap", "Difference"][active_sub_mode])
+	else:
+		match active_sub_mode:
+			SubMode.MERGE:
+				result = _gl_api.place_shape_merge(coords, args[0], args[1], args[2])
+			SubMode.CONFORM:
+				result = _gl_api.place_shape_conforming(coords, args[0], args[1], args[2], color)
+			SubMode.WRAP:
+				result = _gl_api.place_shape_wrapping(coords, args[0], args[1], args[2], color)
+			SubMode.DIFFERENCE:
+				result = _gl_api.apply_shape_difference(coords, args[0], args[1], args[2])
 	if typeof(result) != TYPE_DICTIONARY or result.empty():
 		if LOGGER: LOGGER.error("RoomBuilder: Invalid boolean operation result from GuidesLinesApi.")
 		return false
@@ -245,7 +312,7 @@ func _build_room(coords, args, color) -> bool:
 		if active_sub_mode != SubMode.WRAP and _registry.has_entry(entry.marker_id):
 			_operation.remember(entry.marker_id)
 	if active_sub_mode == SubMode.MERGE and affected.empty():
-		return _place_single(coords, args, color, true)
+		return _place_single(coords, args, color, true, marker)
 	# Markers are map-wide: preserve geometry on every level that owned an affected room.
 	var levels_by_id = {}
 	var settings_by_id = {}
@@ -299,12 +366,14 @@ func _build_room(coords, args, color) -> bool:
 				return false
 	return true
 
-func _place_single(coords, args, color, keep_marker) -> bool:
-	var id = _gl_api.place_shape_marker_plain(coords, args[0], args[1], args[2], color)
+func _place_single(coords, args, color, keep_marker, marker: Dictionary = {}) -> bool:
+	var placed = _gl_api.apply_marker_geometry(marker) if not marker.empty() else {}
+	if not placed is Dictionary: return false
+	var id = placed.get("marker_id", -1) if not marker.empty() else _gl_api.place_shape_marker_plain(coords, args[0], args[1], args[2], color)
 	if typeof(id) != TYPE_INT or id < 0:
 		if LOGGER: LOGGER.error("RoomBuilder: plain marker placement failed.")
 		return false
-	var result = _gl_api.get_shape_polygon(id)
+	var result = {"marker_id": id, "marker_type": "Shape", "polygon": placed.get("marker_polygon", [])} if not marker.empty() else _gl_api.get_shape_polygon(id)
 	if typeof(result) != TYPE_DICTIONARY or result.get("marker_id") != id or result.get("marker_type") != "Shape":
 		if LOGGER: LOGGER.error("RoomBuilder: get_shape_polygon returned a mismatched marker ID or type.")
 		return false
@@ -341,5 +410,6 @@ func _populate_marker_geometry(id, polygon, keep_marker = true, levels: Array = 
 	if keep_marker:
 		_registry.register(id, shapes, outlines, levels, settings)
 	else:
-		_operation._loose = {"fills": shapes, "walls": outlines}
+		_operation._loose.fills += shapes
+		_operation._loose.walls += outlines
 	return success

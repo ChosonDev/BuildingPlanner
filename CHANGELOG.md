@@ -5,6 +5,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.2.6] — 2026-11-09
+
+### Dependencies
+- Require GuidesLines 2.4.5 or later for the template/group geometry, preview and
+  history APIs. The manifest retains the native ID-only dependency declaration.
+
+### Added
+- Room Builder consumes active GuidesLines single/group templates through its
+  public API, with shared rotation/scale, exact geometry and center snapping.
+- Sequential group members use the same Room settings and one compound history
+  action, including all Shape boolean modes and full rollback on partial failure.
+- Closed Path templates receive fill and outline; open Paths and Line guides
+  receive the selected open Wall/Path outline.
+
+### Validation
+- Integration checks execute the authored GuidesLines API with Room Builder for
+  transforms, all boolean modes, mixed groups, native creation failures and replay.
+- All 111 standalone tests pass (1845 assertions).
+- User reported the current changes working in Dungeondraft on 2026-11-09.
+
 ## [1.2.5]
 
 ### Fixed

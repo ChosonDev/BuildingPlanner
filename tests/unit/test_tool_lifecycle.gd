@@ -675,6 +675,28 @@ class ShapeOnlyState:
 		shape_queries += 1
 		return {"active_shape_angle": angle}
 
+class PlacementState:
+	extends ShapeOnlyState
+	var placement_queries = 0
+	func get_placement_state():
+		placement_queries += 1
+		return {"ready": true, "active_marker_type": "Template", "template_scale": 2.0}
+
+func test_room_template_source_prefers_placement_snapshot_over_legacy_shape_state():
+	var api = PlacementState.new()
+	var tool = Tool.new({"Global": {"Editor": {"IsSnapping": false}}})
+	tool._gl_api = api
+	tool._active_mode = tool.Mode.ROOM_BUILDER
+	tool._room_builder = Preview.new()
+	assert_true(tool.handle_canvas_click(Vector2.ZERO))
+	assert_eq(tool._room_builder.state.active_marker_type, "Template")
+	assert_eq(tool._room_builder.state.template_scale, 2.0)
+	assert_eq(api.placement_queries, 1)
+	assert_eq(api.shape_queries, 0)
+	assert_eq(api.queries, 0)
+	tool._room_builder = null
+	tool.shutdown()
+
 
 func test_room_click_prefers_shape_snapshot_and_keeps_full_state_compatibility():
 	var api = ShapeOnlyState.new()

@@ -1,9 +1,9 @@
 {
   "name": "Building Planner",
   "unique_id": "Choson.BuildingPlanner",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "author": "Choson",
-  "description": "Generate pattern fills, walls, paths, rooms, and roofs from GuidesLines Shape markers.",
+  "description": "Generate pattern fills, walls, paths, rooms, and roofs from GuidesLines markers and templates. Requires GuidesLines 2.4.5 or later.",
   "dd_version": "1.1.1.1",
   "dependencies": ["CreepyCre._Lib", "Choson.GuidesLines"]
 }

@@ -162,7 +162,9 @@ func Update(_delta):
 		_room_builder.update_preview(room_position(cached_worldui.MousePosition), gl_tool_state)
 
 func _refresh_shape_state() -> void:
-	if _gl_api and _gl_api.has_method("get_shape_state"):
+	if _gl_api and _gl_api.has_method("get_placement_state"):
+		gl_tool_state = _gl_api.get_placement_state()
+	elif _gl_api and _gl_api.has_method("get_shape_state"):
 		gl_tool_state = _gl_api.get_shape_state()
 	elif _gl_api and _gl_api.has_method("get_tool_state"):
 		gl_tool_state = _gl_api.get_tool_state()

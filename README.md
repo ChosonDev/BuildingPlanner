@@ -1,8 +1,8 @@
 # Building Planner
 
-**Version:** 1.2.5
+**Version:** 1.2.6
 **Author:** Choson  
-**Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.2.0+)
+**Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.4.5+)
 
 ---
 
@@ -95,7 +95,22 @@ Roof style defaults initialize per map; tool switches preserve your choices.
 
 ### Room Builder
 One-click room creation — places a pattern fill **and** a closed outline simultaneously,
-using the current GuidesLines Shape parameters (radius, angle, sides) as the room footprint.
+using the current GuidesLines Shape parameters (radius, angle, sides), or the
+selected template/group when the GuidesLines **Template** tab is active.
+
+For templates, select the desired entry in GuidesLines and switch to BuildingPlanner
+Room mode. Its exact saved geometry and current rotation/scale are used. Room's
+wheel rotation and Alt+wheel scale compose with those transforms around the shared
+group center, without changing GuidesLines settings. Only that center is snapped.
+
+Group members are processed in saved order with the same Room fill and Wall/Path
+settings. Shape members use the selected Single/Merge/Conforming/Wrapping/Difference
+mechanic. Closed Paths receive a floor and outline; open Paths and map-clipped
+Line guides receive an open outline without a floor or boolean area operation.
+One click produces one compound undo/redo action. If any member cannot be built,
+the whole click is rolled back. A missing/invalid template never falls back to a
+different footprint. Templates require the matching updated GuidesLines API;
+older APIs keep the existing Shape workflow.
 
 Pattern settings and outline settings are configured independently in the sidebar.
 Choose **No fill** in the pattern grid to create only the room outline.
@@ -121,28 +136,32 @@ Only the panel that matches the active selection is shown in the sidebar.
 Places a temporary Shape marker at the click position, fills it, builds a wall around it,
 then removes the marker.
 
-**Merge** *(requires GuidesLines v2.2.5+)*  
+**Merge**
+
 Unions the virtual shape with every overlapping existing Shape marker using
 `GuidesLinesApi.place_shape_merge()`. The fill and wall for every affected polygon are
 rebuilt from scratch to reflect the new merged geometry. Old fills and walls belonging to
 absorbed markers are removed automatically.  
 Falls back to Single (marker kept) when there are no overlapping markers.
 
-**Conforming** *(requires GuidesLines v2.2.5+)*  
+**Conforming**
+
 Places the new shape intact while **denting** every overlapping existing Shape marker to
 accommodate it (`GuidesLinesApi.place_shape_conforming` — Difference applied to existing
 markers only). The new shape's fill and outline are built normally; each dented marker's
 fill and outline are rebuilt from its new clipped polygon.  
 Falls back to Single (marker kept) when there are no overlapping markers.
 
-**Wrapping** *(requires GuidesLines v2.2.5+)*  
+**Wrapping**
+
 Places a new Shape marker whose own outline is **trimmed** wherever it overlaps existing
 Shape markers (`GuidesLinesApi.place_shape_wrapping` — Difference applied to the new shape
 only). Existing markers are left completely unchanged. The trimmed shape's fill and outline
 are built from the clipped polygon. If the new shape is fully consumed by existing markers,
 placement is aborted and no marker is left on the map.
 
-**Difference** *(requires GuidesLines v2.2.5+)*  
+**Difference**
+
 Punches a virtual cutter shape into every overlapping existing Shape marker without placing
 any new marker (`GuidesLinesApi.apply_shape_difference`). The overlapping area is removed
 from each affected marker's outline; their fills and outlines are rebuilt from the resulting
@@ -163,22 +182,20 @@ clipped polygons. Acts as a no-op when no existing markers overlap the click pos
 | Dependency | Minimum version |
 |------------|----------------|
 | [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) | any |
-| [GuidesLines](https://github.com/ChosonDev/GuidesLines) | **v2.2.0+** (v2.2.5+ for Merge, Conforming, Wrapping, and Difference modes) |
+| [GuidesLines](https://github.com/ChosonDev/GuidesLines) | **v2.4.5+** |
 
 Optional: **Lievven.Snappy_Mod** — detected automatically; no configuration needed.  
 Optional: **[ColourAndModifyThings](https://github.com/Uchideshi/ColourAndModifyThings)** — enables path color picker in Path Builder and Room Builder (color persists across map reloads).
 
-The unreleased Room Builder changes require the matching local GuidesLines
-`begin_history_capture()` / `end_history_capture()` API and explicit
-`place_shape_marker_plain()` placement for Single and Merge fallback. Use both
-updated mod sources together. Missing capabilities disable the affected preview
-and placement before changing the map. No dependency pin or version
-has been updated by this development change.
+BuildingPlanner 1.2.6 requires GuidesLines 2.4.5 or later, including its template,
+geometry and history-capture APIs. Dungeondraft's manifest dependency list records
+mod IDs only; install the required GuidesLines version separately. Missing API
+capabilities disable the affected preview and placement before changing the map.
 
 ## Installation
 
 1. Install [CreepyCre._Lib](https://github.com/CreepyCre/_Lib)
-2. Install [GuidesLines](https://github.com/ChosonDev/GuidesLines) v2.2.0+
+2. Install [GuidesLines](https://github.com/ChosonDev/GuidesLines) v2.4.5+
 3. Download the latest `BuildingPlanner.zip` from [Releases](../../releases)
 4. Unzip into your Dungeondraft mods folder
 

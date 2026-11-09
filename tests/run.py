@@ -73,6 +73,12 @@ def execute(godot, test_dir, test_filter="", timeout=30):
         "runtime_policy_sha256": hashlib.sha256(
             (ROOT / "runtime_files.json").read_bytes()).hexdigest(),
     }
+    # Integration checks load the authored sibling API; retain its exact source identity.
+    guides_lines = MOD.parent / "GuidesLines"
+    state["guides_lines_source_sha256"] = {
+        path.relative_to(guides_lines).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted((guides_lines / "scripts").rglob("*.gd"))
+    }
     state_file = output / "run.json"
     state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
     command = [

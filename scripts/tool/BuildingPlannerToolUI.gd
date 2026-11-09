@@ -972,6 +972,10 @@ func bind_features() -> void:
 func _build_room_builder_section() -> VBoxContainer:
 	var sec = VBoxContainer.new()
 	sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var source_hint = Label.new()
+	source_hint.text = "Uses the selected GuidesLines template/group, or its Shape settings."
+	source_hint.autowrap = true
+	sec.add_child(source_hint)
 
 	# ---- Sub-mode selector ----
 	var sub_mode_label = Label.new()

@@ -32,6 +32,8 @@ class NativeContainer:
 	var received_type = null
 	var native_draw_calls = 0
 	var fail_new_fills = false
+	var wall_calls = 0
+	var fail_wall_call = -1
 	func create(data, path = false):
 		var node = SavedPath.new() if path else SavedNode.new()
 		node.data = data.duplicate(true)
@@ -52,9 +54,10 @@ class NativeContainer:
 		var node = create({"points": Array(points)})
 		return node
 	func AddWall(points, _texture, _color, _loop, _shadow, _type, _joint, _normalize):
+		wall_calls += 1
 		received_texture = _texture
 		received_type = _type
-		if fail:
+		if fail or wall_calls == fail_wall_call:
 			return null
 		return create({"points": Array(points), "texture": _texture, "color": _color, "shadow": _shadow, "joint": _joint, "loop": _loop})
 
@@ -177,6 +180,193 @@ func after_each():
 		action.dropped(0)
 	records.clear()
 
+func make_template_room(mode):
+	# Test-only integration with the authored sibling checkout, through its public API.
+	var root = ProjectSettings.globalize_path("res://").plus_file("../../GuidesLines").simplify_path()
+	var level = {"PatternShapes": autofree(NativeContainer.new()), "Walls": autofree(NativeContainer.new()),
+		"Pathways": autofree(NativeContainer.new()), "TileMap": {"CellSize": Vector2(100, 100)}}
+	var world = {"Level": level, "WorldRect": Rect2(-4000, -4000, 8000, 8000)}
+	var mod = {"markers_opacity": 0.7, "guides_lines_api": null, "Global": {"API": {}, "Editor": {"IsSnapping": false}}}
+	var tool = load(root.plus_file("scripts/tool/GuidesLinesTool.gd")).new(mod)
+	tool.GuideMarkerClass = load(root.plus_file("scripts/guides/GuideMarker.gd"))
+	tool.cached_world = world
+	mod["guides_tool"] = tool
+	var api = load(root.plus_file("scripts/api/guides_lines_api.gd")).new(mod, null)
+	mod.guides_lines_api = api
+	var first = api.place_shape_marker_plain(Vector2.ZERO, 1.0, 45, 4)
+	var second = api.place_shape_marker_plain(Vector2(300, 0), 1.0, 45, 4)
+	tool.start_group_capture()
+	tool.template_group_ids = {first: true, second: true}
+	assert_true(tool.save_group_template())
+	tool.set_marker_type("Template")
+	var parent = {"Global": {"World": world, "Editor": {"Tools": {}}, "API": {"HistoryApi": self}, "ModMapData": {}}}
+	var room = Room.new(api, null, parent)
+	room._pattern_fill.active_texture = GradientTexture.new()
+	room._wall_builder.active_texture = GradientTexture.new()
+	room._path_builder.active_texture = GradientTexture.new()
+	room.active_sub_mode = mode
+	return {"room": room, "tool": tool, "api": api, "mod": mod}
+
+func release_template_room(pair):
+	pair.api._unload()
+	pair.mod.guides_lines_api = null
+	pair.mod.guides_tool = null
+	pair.tool.ui.tool = null
+	pair.tool.placement.tool = null
+	pair.tool._fill_handler.tool = null
+	pair.tool.parent_mod = null
+
+func native_room_state(room):
+	var level = room._parent_mod.Global.World.Level
+	var state = []
+	for container in [level.PatternShapes, level.Walls, level.Pathways]:
+		var data = []
+		for node in container.get_children(): data.append(node.data.duplicate(true))
+		state.append(data)
+	return state
+
+func test_template_integration_group_single_uses_shared_transforms_and_one_compound_undo():
+	var pair = make_template_room(Room.SubMode.SINGLE)
+	var room = pair.room
+	assert_true(pair.api.set_template_transform(30, 1.5))
+	room.adjust_angle(60)
+	room.adjust_scale(0.5)
+	var pos = Vector2(1000, 1000)
+	var expected = pair.api.get_template_markers(pos, -1, 60, 1.5)
+	var before = pair.api.get_markers()
+	room.update_preview(pos, pair.api.get_placement_state())
+	assert_true(room._preview_active)
+	assert_eq_deep(pair.tool._api_preview.markers, expected)
+	assert_true(room.build_room_at(pos, pair.api.get_placement_state()))
+	assert_eq(records.size(), 1)
+	assert_eq_deep(pair.api.get_markers(), before)
+	var level = room._parent_mod.Global.World.Level
+	assert_eq(level.PatternShapes.get_child_count(), 2)
+	assert_eq(level.Walls.get_child_count(), 2)
+	for i in range(2):
+		assert_eq_deep(level.Walls.get_child(i).data.points, expected[i].polygon)
+	assert_almost_eq(expected[0].position.x, 1000.0, 0.001)
+	assert_almost_eq(expected[0].position.y, 662.5, 0.001)
+	var after = native_room_state(room)
+	var action = records.back()
+	for _cycle in range(2):
+		action.undo()
+		assert_eq_deep(native_room_state(room), [[], [], []])
+		action.redo()
+		assert_eq_deep(native_room_state(room), after)
+	assert_eq_deep(pair.api.get_markers(), before)
+	room.stop_preview()
+	assert_true(pair.tool._api_preview.empty())
+	release_template_room(pair)
+	yield(get_tree(), "idle_frame")
+
+func test_template_integration_all_boolean_modes_process_members_and_restore_original_room():
+	for mode in [Room.SubMode.MERGE, Room.SubMode.CONFORM, Room.SubMode.WRAP, Room.SubMode.DIFFERENCE]:
+		var pair = make_template_room(Room.SubMode.MERGE)
+		var room = pair.room
+		var pos = Vector2(1500, 1500)
+		assert_true(room.build_room_at(pos, {"ready": true, "active_shape_radius": 2.5, "active_shape_angle": 45.0, "active_shape_sides": 4}))
+		var before = native_room_state(room)
+		var markers_before = pair.api.get_markers()
+		var count = records.size()
+		room.active_sub_mode = mode
+		assert_true(room.build_room_at(pos, pair.api.get_placement_state()), "Template mode %d" % mode)
+		assert_eq(records.size(), count + 1)
+		var after = native_room_state(room)
+		var markers_after = pair.api.get_markers()
+		assert_eq(after[1].size(), 3 if mode in [Room.SubMode.CONFORM, Room.SubMode.WRAP] else 1)
+		var action = records.back()
+		for _cycle in range(2):
+			action.undo()
+			assert_eq_deep(native_room_state(room), before)
+			assert_eq_deep(pair.api.get_markers(), markers_before)
+			action.redo()
+			assert_eq_deep(native_room_state(room), after)
+			assert_eq_deep(pair.api.get_markers(), markers_after)
+		release_template_room(pair)
+		yield(get_tree(), "idle_frame")
+
+func test_template_integration_mixed_paths_lines_and_closed_paths_share_room_settings():
+	var pair = make_template_room(Room.SubMode.SINGLE)
+	var room = pair.room
+	var path = pair.api.place_path_marker([Vector2(600, 0), Vector2(800, 0)])
+	var closed = pair.api.place_path_marker([Vector2(900, 0), Vector2(1000, 0), Vector2(900, 100)], true)
+	var line = pair.api.place_line_marker(Vector2(1100, 0), 90, true)
+	pair.tool.start_group_capture()
+	pair.tool.template_group_ids = {0: true, path: true, closed: true, line: true}
+	assert_true(pair.tool.save_group_template())
+	room._wall_builder.active_color = Color.red
+	var pos = Vector2(1500, 1500)
+	assert_true(room.build_room_at(pos, pair.api.get_placement_state()))
+	var level = room._parent_mod.Global.World.Level
+	assert_eq(level.Walls.get_child_count(), 4)
+	assert_eq(level.PatternShapes.get_child_count(), 2, "Only Shape and closed Path have floor areas")
+	for wall in level.Walls.get_children(): assert_eq(wall.data.color, Color.red)
+	assert_true(level.Walls.get_child(0).data.loop)
+	assert_false(level.Walls.get_child(1).data.loop)
+	assert_true(level.Walls.get_child(2).data.loop)
+	assert_false(level.Walls.get_child(3).data.loop)
+	records.back().undo()
+	assert_eq(level.Walls.get_child_count(), 0)
+	assert_eq(level.PatternShapes.get_child_count(), 0)
+	records.back().redo()
+	assert_eq(level.Walls.get_child_count(), 4)
+	room.active_outline_mode = room.OutlineMode.PATH
+	room._path_builder.active_color = Color.green
+	var count = records.size()
+	assert_true(room.build_room_at(pos + Vector2(1000, 0), pair.api.get_placement_state()))
+	assert_eq(records.size(), count + 1)
+	assert_eq(level.Pathways.get_child_count(), 4)
+	for path_node in level.Pathways.get_children(): assert_eq(path_node.modulate, Color.green)
+	records.back().undo()
+	assert_eq(level.Pathways.get_child_count(), 0)
+	records.back().redo()
+	assert_eq(level.Pathways.get_child_count(), 4)
+	release_template_room(pair)
+	yield(get_tree(), "idle_frame")
+
+func test_template_integration_partial_native_failure_rolls_back_entire_group_in_every_mode():
+	for mode in range(5):
+		var pair = make_template_room(Room.SubMode.MERGE)
+		var room = pair.room
+		var pos = Vector2(1500, 1500)
+		assert_true(room.build_room_at(pos, {"ready": true, "active_shape_radius": 2.5, "active_shape_angle": 45.0, "active_shape_sides": 4}))
+		var before = native_room_state(room)
+		var markers = pair.api.get_markers()
+		var count = records.size()
+		var walls = room._parent_mod.Global.World.Level.Walls
+		walls.wall_calls = 0
+		walls.fail_wall_call = 2
+		room.active_sub_mode = mode
+		assert_false(room.build_room_at(pos, pair.api.get_placement_state()), "Rollback mode %d" % mode)
+		assert_eq(records.size(), count)
+		assert_eq_deep(native_room_state(room), before)
+		assert_eq_deep(pair.api.get_markers(), markers)
+		assert_null(pair.tool._captured_history)
+		walls.fail_wall_call = -1
+		release_template_room(pair)
+		yield(get_tree(), "idle_frame")
+
+func test_template_integration_single_template_and_invalid_group_fail_before_mutation():
+	var pair = make_template_room(Room.SubMode.SINGLE)
+	var room = pair.room
+	pair.tool.capture_marker_as_template(Vector2.ZERO)
+	assert_true(pair.api.select_template(pair.tool.templates.back().id))
+	assert_true(pair.api.set_template_transform(25, 1.5))
+	var pos = Vector2(1200, 1200)
+	assert_true(room.build_room_at(pos, pair.api.get_placement_state()))
+	assert_eq(room._parent_mod.Global.World.Level.Walls.get_child_count(), 1)
+	var before = native_room_state(room)
+	var count = records.size()
+	assert_true(pair.api.select_template(pair.tool.templates[0].id))
+	# A legitimate empty boolean outline cannot define a room floor.
+	pair.tool.templates[0].items[1].shape_primitives.clear()
+	assert_false(room.build_room_at(pos, pair.api.get_placement_state()))
+	assert_eq(records.size(), count)
+	assert_eq_deep(native_room_state(room), before)
+	assert_null(pair.tool._captured_history)
+	release_template_room(pair)
+	yield(get_tree(), "idle_frame")
 
 func test_merge_adds_current_level_without_losing_old_levels_or_undo_data():
 	var room = make_room(Room.SubMode.MERGE)

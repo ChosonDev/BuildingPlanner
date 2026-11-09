@@ -8,7 +8,7 @@ needed. This is the initial suite, not full feature coverage.
 
 | Field | Value |
 | --- | --- |
-| Target | `Choson.BuildingPlanner` 1.2.5, current checkout including local changes |
+| Target | `Choson.BuildingPlanner` 1.2.6, current checkout including local changes |
 | Purpose | Detect loading, geometry, registry, history and early API regressions |
 | Environment | Godot `3.4.stable.official.206ba70f4`; Python 3.8+ standard library |
 | Test dependency | GUT 7.4.3, commit `c11ba9daf49b2ec127d6113be89534dc9ee21873`, upstream `bitwes/Gut`, MIT |
@@ -55,6 +55,15 @@ incomplete selection, skipped or assertion-free cases and engine errors fail.
 
 The suite covers runtime smoke checks, geometry, native creation collaborators,
 compound room history, independent textures and tool lifecycle regressions.
+
+Template integration tests additionally load the authored sibling
+`Mods/GuidesLines` checkout and call its real public API. No runtime code loads
+another mod by filesystem path. `guides_lines_source_sha256` in each report
+records the sibling runtime source hashes. Run these checks with
+`python -X utf8 Mods/BuildingPlanner/tests/run.py --test template_integration`.
+They exercise shared transforms, sequential Shape boolean modes, mixed groups,
+Wall/Path settings, single compound undo/redo and full rollback on partial failure.
+Native map objects remain controlled substitutes; Dungeondraft acceptance is separate.
 
 - All 12 runtime scripts compile and their reviewed outer constructors run
   off-tree. Owned Nodes are freed. Nested history records have a separate workflow.
