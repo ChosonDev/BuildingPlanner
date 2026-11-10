@@ -26,6 +26,7 @@ var _zone_hash = ""
 var _style_hash = 0
 var _geometry_style = []
 var _prepared_points = []
+var _prepared_contours = []
 var _prepared_sources = []
 var _geometry_reason = ""
 var _resolved = {}
@@ -56,6 +57,7 @@ func clear_preview() -> void:
 	_style_hash = 0
 	_geometry_style = []
 	_prepared_points = []
+	_prepared_contours = []
 	_prepared_sources = []
 	_geometry_reason = ""
 	_resolved = {}
@@ -125,7 +127,7 @@ func refresh_preview(delta: float, feature, fill: bool, path: bool) -> void:
 				if target.get("kind") == "Fill":
 					var region = Utils.parse_fill_region(target.get("fill"), diagnostic)
 					if not region.empty():
-						_resolved = {"points": region.polygon, "closed": true, "source_polygons": region.source_polygons, "polygon_validated": true}
+						_resolved = {"points": region.polygon, "closed": true, "source_polygons": region.source_polygons, "polygon_validated": true} if fill else Utils.region_outline(region)
 				elif target.get("kind") == "Path" and not fill:
 					_resolved = Utils.parse_path_outline(target.get("marker"), diagnostic)
 				if _resolved.empty() and diagnostic.reason == "":
@@ -141,20 +143,29 @@ func refresh_preview(delta: float, feature, fill: bool, path: bool) -> void:
 	if zone_changed or geometry_style != _geometry_style:
 		_geometry_style = geometry_style
 		_prepared_points = []
+		_prepared_contours = []
 		var geometry_diagnostic = PreviewDiagnostic.new()
 		geometry_diagnostic.reason = _resolve_reason
 		if not _resolved.empty():
-			_prepared_points = _resolved.points if fill else Utils.prepare_outline(_resolved.points, _resolved.closed, settings, geometry_diagnostic, _resolved.get("polygon_validated", false))
-			if path and not _prepared_points.empty():
-				_prepared_points = Utils.path_preview_points(_prepared_points, _resolved.closed, settings.active_smoothness)
+			_prepared_contours = [_resolved.points] if fill else Utils.prepare_outlines(_resolved, settings, geometry_diagnostic)
+			if path:
+				for i in range(_prepared_contours.size()):
+					_prepared_contours[i] = Utils.path_preview_points(_prepared_contours[i], _resolved.closed, settings.active_smoothness)
+			if not _prepared_contours.empty(): _prepared_points = _prepared_contours[0]
 		_geometry_reason = geometry_diagnostic.reason
 		_prepared_sources = []
 		for source in _resolved.get("source_polygons", []):
-			if not _same_centerline(source, _prepared_points, _resolved.closed):
-				_prepared_sources.append(source)
+			var sources = Utils.split_outline(source) if not fill and _resolved.has("contours") else [source]
+			for boundary in sources:
+				var same = false
+				for contour in _prepared_contours:
+					if _same_centerline(boundary, contour, _resolved.closed): same = true
+				if not same:
+					_prepared_sources.append(boundary)
 	preview = {"reason": _geometry_reason, "zone_hash": _zone_hash, "parameter_hash": style_hash}
 	if not _resolved.empty():
 		preview.points = _prepared_points
+		preview.contours = _prepared_contours
 		preview.closed = _resolved.closed
 		preview.fill = fill
 		preview.sources = _prepared_sources
@@ -201,7 +212,9 @@ func _draw() -> void:
 		_source_bounds = _source_bounds.expand(inverse.xform(corner))
 	for source in preview.get("sources", []):
 		_draw_source(source, closed, zoom)
-	if points.size() >= 2:
+	for contour in preview.get("contours", [points]):
+		points = contour
+		if points.size() < 2: continue
 		if preview.get("fill", false) and not (is_instance_valid(_texture_preview) and _texture_preview.visible):
 			draw_colored_polygon(PoolVector2Array(points), Color(color.r, color.g, color.b, 0.22))
 		var line = points.duplicate()

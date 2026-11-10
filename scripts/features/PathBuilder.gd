@@ -64,10 +64,21 @@ func build_at(coords: Vector2) -> bool:
 	if outline.empty():
 		return false
 
-	var path = _create_path(outline.points, null, outline.closed, null, outline.get("polygon_validated", false))
-	if not is_instance_valid(path):
-		return false
-	BuildingPlannerHistory.record_action(_parent_mod, LOGGER, BuildingPlannerHistory.PathBuilderRecord.new(_parent_mod, path))
+	var settings = get_settings()
+	var contours = BuildingPlannerUtils.prepare_outlines(outline, settings, LOGGER)
+	if contours.empty(): return false
+	settings.active_offset = 0.0
+	settings.active_reverse_direction = false
+	var records = []
+	for contour in contours:
+		var node = _create_path(contour, null, outline.closed, settings, true)
+		if not is_instance_valid(node):
+			for record in records: record.undo()
+			return false
+		records.append(BuildingPlannerHistory.PathBuilderRecord.new(_parent_mod, node))
+	for record in records: record._index = record._node.get_index()
+	var action = records[0] if records.size() == 1 else BuildingPlannerHistory.OutlineGroupRecord.new(records)
+	BuildingPlannerHistory.record_action(_parent_mod, LOGGER, action)
 	return true
 
 ## Snapshot the complete style; callers own the returned Dictionary.

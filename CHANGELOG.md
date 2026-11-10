@@ -5,6 +5,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.2.10] — 2026-11-10
+
+### Fixed
+- Build and preview separate closed Wall/Path contours around nested shapes,
+  including Room Builder outlines, without technical hole bridges. Keep all
+  boundaries in one undo/redo action and roll back partial builds.
+
 ## [1.2.9] — 2026-11-10
 
 ### Added

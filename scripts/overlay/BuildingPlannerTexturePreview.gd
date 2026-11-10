@@ -7,6 +7,7 @@ var _polygon = null
 var _line = null
 var _shadow = null
 var _caps = []
+var _contour_previews = []
 var _resources = {}
 var _line_properties = {}
 var _path_normalize_uv = false
@@ -40,6 +41,7 @@ func _init():
 
 func clear_preview() -> void:
 	hide()
+	for renderer in _contour_previews: renderer.clear_preview()
 	_polygon.hide()
 	_polygon.texture = null
 	_polygon.material = null
@@ -69,6 +71,18 @@ func sync_preview(preview: Dictionary, settings: Dictionary, path: bool, parent_
 		_draw_pattern(points, settings, parent_mod)
 	else:
 		_draw_outline(points, preview.closed, settings, path, parent_mod)
+		var contours = preview.get("contours", [points])
+		for i in range(1, contours.size()):
+			if _contour_previews.size() < i:
+				var renderer = get_script().new()
+				renderer.modulate = Color.white # Parent already supplies preview opacity.
+				renderer._resources = _resources
+				add_child(renderer)
+				_contour_previews.append(renderer)
+			var contour_preview = preview.duplicate()
+			contour_preview.erase("contours")
+			contour_preview.points = contours[i]
+			_contour_previews[i - 1].sync_preview(contour_preview, settings, path, parent_mod)
 	show()
 
 func _draw_pattern(points: Array, settings: Dictionary, parent_mod) -> void:

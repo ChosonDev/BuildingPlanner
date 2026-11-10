@@ -395,16 +395,22 @@ func _populate_marker_geometry(id, polygon, keep_marker = true, levels: Array = 
 		settings = {"outline_mode": active_outline_mode, "fill": _pattern_fill.get_settings(), "outline": outline.get_settings()}
 	var shapes = []
 	var outlines = []
+	var contours = BuildingPlannerUtils.prepare_outlines(BuildingPlannerUtils.region_outline({"polygon": polygon, "source_polygons": [polygon]}), settings.outline, LOGGER)
+	if contours.empty(): return false
+	var outline_settings = settings.outline.duplicate()
+	outline_settings.active_offset = 0.0
+	outline_settings.active_reverse_direction = false
 	var success = true
 	for level in levels:
 		var fill = _pattern_fill._create_shape(polygon, level, settings.fill) if settings.fill.active_texture != null else null
-		var outline = _wall_builder._create_wall(polygon, level, true, settings.outline) if settings.outline_mode == OutlineMode.WALL else _path_builder._create_path(polygon, level, true, settings.outline)
 		if is_instance_valid(fill):
 			shapes.append(fill)
-		if is_instance_valid(outline):
-			outlines.append(outline)
-		else:
-			success = false
+		for contour in contours:
+			var outline = _wall_builder._create_wall(contour, level, true, outline_settings) if settings.outline_mode == OutlineMode.WALL else _path_builder._create_path(contour, level, true, outline_settings)
+			if is_instance_valid(outline):
+				outlines.append(outline)
+			else:
+				success = false
 		if settings.fill.active_texture != null and not is_instance_valid(fill):
 			success = false
 	if keep_marker:

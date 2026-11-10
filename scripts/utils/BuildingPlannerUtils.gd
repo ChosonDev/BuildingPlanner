@@ -40,7 +40,7 @@ static func offset_outline(points: Array, closed: bool, distance, logger = null,
 	if reversed:
 		polygon.invert()
 	var contours = Geometry.offset_polygon_2d(PoolVector2Array(polygon), distance, Geometry.JOIN_MITER)
-	# ponytail: one node per outline; support multiple nodes in callers/history before allowing split contours or holes.
+	# ponytail: each offset boundary must remain one loop; use region-level topology resolution to support offset splits or merging holes.
 	if contours.size() != 1:
 		if logger: logger.error("BuildingPlanner: offset collapses or splits the outline; choose a smaller offset or 0.")
 		return []
@@ -70,7 +70,44 @@ static func resolve_outline(api, coords: Vector2, logger = null) -> Dictionary:
 	var region = resolve_fill_region(api, coords, logger)
 	if region.empty():
 		return {}
-	return {"points": region.polygon, "closed": true, "source_polygons": region.get("source_polygons", [region.polygon]), "polygon_validated": true}
+	return region_outline(region)
+
+## Fill bridges repeat vertices exactly. Peel closed walks; two-edge walks are bridges.
+## Also separates tangent loops sharing a vertex, without changing the fill polygon.
+static func split_outline(polygon: Array) -> Array:
+	var contours = []
+	var walk = []
+	var indices = {}
+	for point in polygon + [polygon[0]] if not polygon.empty() else []:
+		if indices.has(point):
+			var start = indices[point]
+			var loop = walk.slice(start, walk.size() - 1)
+			if loop.size() >= 3 and abs(signed_area(loop)) > 0.000001:
+				contours.append(loop)
+			while walk.size() > start + 1:
+				indices.erase(walk.pop_back())
+		else:
+			indices[point] = walk.size()
+			walk.append(point)
+	return contours
+
+static func region_outline(region: Dictionary) -> Dictionary:
+	return {"points": region.polygon, "contours": split_outline(region.polygon), "closed": true, "source_polygons": region.source_polygons, "polygon_validated": true}
+
+## Prepare every boundary before creating anything. Positive offset expands the solid
+## region, so holes (opposite winding) shrink. Explicit Path markers stay continuous.
+static func prepare_outlines(outline: Dictionary, settings: Dictionary, logger = null) -> Array:
+	var contours = outline.get("contours", [outline.points])
+	var prepared = []
+	var region_area = signed_area(outline.points) if outline.has("contours") else 0.0
+	for contour in contours:
+		var style = settings.duplicate()
+		if outline.has("contours") and signed_area(contour) * region_area < 0:
+			style.active_offset = -settings.get("active_offset", 0.0)
+		var points = prepare_outline(contour, outline.closed, style, logger, outline.get("polygon_validated", false))
+		if points.empty(): return []
+		prepared.append(points)
+	return prepared
 
 ## Validate a cached API Path snapshot once per target revision.
 static func parse_path_outline(marker, logger = null) -> Dictionary:

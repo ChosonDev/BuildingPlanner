@@ -80,6 +80,25 @@ class NativeObjectRecord:
 	func record_type():
 		return "BuildingPlanner." + _kind
 
+## One click owns all boundaries, while native records retain IDs, tint and order.
+class OutlineGroupRecord:
+	var _records
+	func _init(records):
+		_records = records
+	func undo():
+		for i in range(_records.size() - 1, -1, -1): _records[i].undo()
+	func redo():
+		for record in _records: record.redo()
+		# Under-sorted paths are inserted at index zero; restore final sibling order.
+		for i in range(_records.size() - 1, -1, -1):
+			var record = _records[i]
+			if Utils.is_current_world(record._parent_mod, record._world, record._level):
+				Utils.restore_order(record._node, record._index)
+	func dropped(direction):
+		for record in _records: record.dropped(direction)
+	func record_type():
+		return _records[0].record_type()
+
 class WallBuilderRecord:
 	extends NativeObjectRecord
 	func _init(parent_mod, wall).(parent_mod, wall, "WallBuilder"):
