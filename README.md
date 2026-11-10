@@ -1,6 +1,6 @@
 # Building Planner
 
-**Version:** 1.2.8
+**Version:** 1.2.9
 **Author:** Choson  
 **Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.4.5+)
 
@@ -11,6 +11,44 @@ Select the **Building Planner** tool in the *Design* category of the Dungeondraf
 then choose a mode from the sidebar.
 
 ## Features
+
+### Hover Build Preview
+Pattern Fill previews the actual boolean region under the pointer. Wall and Path
+Builder preview the resolved centerline, including offset and reverse direction;
+Path smoothing follows the native host algorithm. Open starts are green, ends
+are orange, and an arrow marks traversal. A differing source outline is dashed blue.
+Missing textures or invalid geometry show a cursor message without per-frame logs.
+
+The preview now draws the selected textures at 60% opacity. Pattern Fill uses the
+host's pattern/colorable materials, rotation, world-space tiling and optional
+border. Wall Builder shows texture thickness, joint style, end textures and the
+selected shadow. Path Builder shows texture width, smoothing, fade and taper.
+Only ordinary UI Polygon2D/Line2D/Sprite nodes are retained under the overlay;
+shared asset textures, host materials and native map objects are never modified.
+
+Hover creates no map objects, IDs or history. Moving target queries run at most
+15 times per second. GuidesLines returns a zone hash and caches visited boolean
+components, including map save/load and source dependencies. An unchanged hash
+does not resend polygons or rebuild preview nodes/materials. A separate parameter
+hash tracks texture/color/style changes; offset/direction/smoothing preparation is
+also reused when only appearance changes. Marker revisions trigger a cheap target
+check; distant edits preserve the current preview. Clicks resolve fresh geometry
+and settings again.
+Dialogs, panels, map/tool changes and unload clear the preview. Room Builder keeps
+its existing marker preview; Roof preview remains a separate stage. Preview
+textures are drawn above the map so they remain visible; final layer occlusion
+and lighting are assessed after placement.
+Camera changes redraw screen-sized annotations, while retained texture geometry
+is transformed by Godot. Offscreen source edges are culled. At most 2048 source
+dash commands are retained per redraw; dense source outlines use solid blue so
+large nested circles do not generate tens of thousands of tiny draw commands.
+The target polygon/outline itself is never simplified by this limit.
+
+This feature requires GuidesLines 2.4.6 or later with
+`get_build_preview_target()` and geometry revisions. Update both mods together.
+Older installed APIs retain click-to-build and show an update message for hover.
+User testing confirmed the textured previews and cache/render optimizations
+working in Dungeondraft.
 
 ### Pattern Fill
 Click anywhere inside a Shape marker to fill its interior with the selected terrain pattern.
@@ -208,7 +246,7 @@ clipped polygons. Acts as a no-op when no existing markers overlap the click pos
 Optional: **Lievven.Snappy_Mod** — detected automatically; no configuration needed.  
 Optional: **[ColourAndModifyThings](https://github.com/Uchideshi/ColourAndModifyThings)** — enables path color picker in Path Builder and Room Builder (color persists across map reloads).
 
-BuildingPlanner 1.2.8 requires GuidesLines 2.4.5 or later, including its template,
+BuildingPlanner 1.2.9 requires GuidesLines 2.4.5 or later, including its template,
 geometry and history-capture APIs. Dungeondraft's manifest dependency list records
 mod IDs only; install the required GuidesLines version separately. Missing API
 capabilities disable the affected preview and placement before changing the map.

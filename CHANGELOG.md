@@ -5,6 +5,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.2.9] — 2026-11-10
+
+### Added
+- Textured hover previews for Pattern Fill, Wall and Path, including source
+  outlines, direction, offsets and invalid-build messages. Requires GuidesLines
+  2.4.6 for cached preview queries.
+
+### Changed
+- Reuse cached geometry and preview nodes, limit expensive hover queries and
+  reduce rendering work for complex markers. Clicks revalidate geometry and style.
+
+### Fixed
+- Clear previews over panels and dialogs and on map, level or tool changes;
+  use the host panel font for preview messages. Hover leaves map history untouched.
+
+### Validation
+- All 151 standalone tests pass (2606 assertions). User testing confirmed the
+  changes working in Dungeondraft.
+
 ## [1.2.8] — 2026-11-09
 
 ### Added

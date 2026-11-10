@@ -57,7 +57,7 @@ func build_at(coords: Vector2) -> bool:
 	if outline.empty():
 		return false
 
-	var wall = _create_wall(outline.points, null, outline.closed)
+	var wall = _create_wall(outline.points, null, outline.closed, null, outline.get("polygon_validated", false))
 	if not is_instance_valid(wall):
 		return false
 	BuildingPlannerHistory.record_action(_parent_mod, LOGGER, BuildingPlannerHistory.WallBuilderRecord.new(_parent_mod, wall))
@@ -75,14 +75,12 @@ func get_settings() -> Dictionary:
 	}
 
 ## Explicit saved settings leave the live UI selection untouched.
-func _create_wall(polygon: Array, level = null, closed: bool = true, settings = null):
+func _create_wall(polygon: Array, level = null, closed: bool = true, settings = null, polygon_validated: bool = false):
 	if settings == null:
 		settings = get_settings()
-	polygon = BuildingPlannerUtils.offset_outline(polygon, closed, settings.get("active_offset", 0.0), LOGGER)
+	polygon = BuildingPlannerUtils.prepare_outline(polygon, closed, settings, LOGGER, polygon_validated)
 	if polygon.empty():
 		return null
-	if settings.get("active_reverse_direction", false):
-		polygon = BuildingPlannerUtils.reverse_outline(polygon, closed)
 	# --- Dungeondraft context ---
 	level = BuildingPlannerUtils.resolve_level(_parent_mod, level)
 	if not level:

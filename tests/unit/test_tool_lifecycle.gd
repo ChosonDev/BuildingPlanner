@@ -378,13 +378,14 @@ func test_room_preview_uses_click_snap_and_canvas_boundaries():
 	controlled_tool.source_code = 'extends "' + mod_root.plus_file("scripts/tool/BuildingPlannerTool.gd") + '"\nvar on_canvas = true\nfunc _init(mod).(mod):\n\tpass\nfunc is_mouse_on_canvas() -> bool:\n\treturn on_canvas\n'
 	assert_eq(controlled_tool.reload(), OK)
 	var tool = controlled_tool.new({"Global": {"Editor": editor}})
+	tool.cached_world = {"Level": {}}
 	tool.cached_worldui = canvas
 	tool.is_enabled = true
 	tool._active_mode = tool.Mode.ROOM_BUILDER
 	tool._room_builder = Preview.new()
 	tool._gl_api = ShapeState.new()
 	# Supply an existing overlay so this check only exercises preview/input policy.
-	var overlay = autofree(Node2D.new())
+	var overlay = autofree(load(mod_root.plus_file("scripts/overlay/BuildingPlannerOverlay.gd")).new())
 	canvas.add_child(overlay)
 	tool._overlay = overlay
 	for point in [Vector2(449, 200), Vector2(500, 99), Vector2(500, 701), Vector2(450, 100), Vector2(500, 700)]:

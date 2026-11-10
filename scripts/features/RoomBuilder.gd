@@ -134,7 +134,7 @@ func update_preview(world_pos: Vector2, state: Dictionary) -> void:
 
 ## Clears the preview immediately — call on mode switch or tool deactivation.
 func stop_preview() -> void:
-	if _gl_api and _preview_active:
+	if is_instance_valid(_gl_api) and _preview_active:
 		_gl_api.clear_shape_preview()
 	_preview_active = false
 

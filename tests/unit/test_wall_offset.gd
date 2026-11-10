@@ -51,6 +51,16 @@ func test_wall_offset_rejects_collapse_split_open_and_invalid_values_before_nati
 	assert_eq(container.wall_calls, 0)
 	assert_eq(logger.errors.size(), 10)
 
+func test_wall_offset_validated_fill_skips_only_redundant_input_validation():
+	var region = Utils.parse_fill_region({"polygon": SQUARE})
+	var settings = {"active_offset": 10.0, "active_reverse_direction": true}
+	assert_eq_deep(Utils.prepare_outline(region.polygon, true, settings, null, true), Utils.prepare_outline(SQUARE, true, settings))
+	assert_eq_deep(region.polygon, SQUARE)
+	# Path snapshots guarantee finite points, not a simple closed polygon. They keep offset validation.
+	var path = Utils.parse_path_outline({"id": 1, "marker_type": "Path", "path_closed": true, "marker_points": [[0, 0], [100, 100], [0, 100], [100, 0]]})
+	assert_false(path.get("polygon_validated", false))
+	assert_true(Utils.prepare_outline(path.points, path.closed, settings).empty())
+
 
 func test_wall_offset_standalone_history_restores_actual_geometry_after_setting_changes():
 	var api = rooms.MarkerApi.new()

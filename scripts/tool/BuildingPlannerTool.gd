@@ -51,6 +51,7 @@ var gl_tool_state: Dictionary = {}
 
 var _overlay = null   # BuildingPlannerOverlay Node2D instance
 var _overlay_class = null
+var _preview_level = null
 
 # ============================================================================
 # UI
@@ -152,14 +153,31 @@ func Update(_delta):
 		_destroy_overlay()
 	if not is_instance_valid(_overlay) and is_instance_valid(cached_worldui):
 		_create_overlay()
+	var level = cached_world.Level if cached_world != null else null
+	if level != _preview_level:
+		_clear_previews()
+		_preview_level = level
+	if level == null or not is_mouse_on_canvas():
+		_clear_previews()
+		return
 
 	# Drive Room Builder preview every frame while active
 	if _active_mode == Mode.ROOM_BUILDER and _room_builder and cached_worldui:
-		if not is_mouse_on_canvas():
-			_room_builder.stop_preview()
-			return
 		_refresh_shape_state()
 		_room_builder.update_preview(room_position(cached_worldui.MousePosition), gl_tool_state)
+	elif is_instance_valid(_overlay):
+		var feature = null
+		match _active_mode:
+			Mode.PATTERN_FILL: feature = _pattern_fill
+			Mode.WALL_BUILDER: feature = _wall_builder
+			Mode.PATH_BUILDER: feature = _path_builder
+		_overlay.refresh_preview(_delta, feature, _active_mode == Mode.PATTERN_FILL, _active_mode == Mode.PATH_BUILDER)
+
+func _clear_previews() -> void:
+	if is_instance_valid(_overlay):
+		_overlay.clear_preview()
+	if _room_builder:
+		_room_builder.stop_preview()
 
 func _refresh_shape_state() -> void:
 	if _gl_api and _gl_api.has_method("get_placement_state"):
@@ -198,6 +216,21 @@ func is_mouse_on_canvas() -> bool:
 	if not is_instance_valid(cached_worldui) or not cached_worldui.IsInsideBounds:
 		return false
 	var viewport = cached_worldui.get_viewport()
+	if viewport.gui_has_modal_stack():
+		return false
+	if is_instance_valid(tool_panel) and tool_panel.is_visible_in_tree() and Rect2(Vector2.ZERO, tool_panel.rect_size).has_point(tool_panel.get_local_mouse_position()):
+		return false
+	var editor = parent_mod.Global.Editor
+	if editor is Node and is_instance_valid(editor):
+		var windows = editor.get("Windows")
+		if windows != null:
+			for window in windows.values():
+				if is_instance_valid(window) and window.visible:
+					return false
+		# Use the host's real canvas bounds, including UI scale and resized panels.
+		var content = editor.get_node_or_null("VPartition/Panels/HSplit/Content")
+		if content is Control:
+			return content.is_visible_in_tree() and Rect2(Vector2.ZERO, content.rect_size).has_point(content.get_local_mouse_position())
 	var sidebar_right = max(450.0, tool_panel.get_global_rect().end.x) if is_instance_valid(tool_panel) else 450.0
 	return is_canvas_position(viewport.get_mouse_position(), viewport.size, sidebar_right)
 
@@ -257,9 +290,8 @@ func create_ui_panel():
 # ============================================================================
 
 func _set_mode(mode: int):
-	# Clear Room Builder preview when leaving that mode
-	if _active_mode == Mode.ROOM_BUILDER and mode != Mode.ROOM_BUILDER and _room_builder:
-		_room_builder.stop_preview()
+	if mode != _active_mode:
+		_clear_previews()
 	_active_mode = mode
 
 # ============================================================================
