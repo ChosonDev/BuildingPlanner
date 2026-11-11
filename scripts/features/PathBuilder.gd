@@ -128,8 +128,6 @@ func _create_path(polygon: Array, level = null, closed: bool = true, settings = 
 	var local_points = PoolVector2Array()
 	for point in polygon:
 		local_points.append(point - origin)
-	if closed:
-		local_points.append(Vector2.ZERO) # Preserve the explicit seam without copying the input.
 	var path_data = {
 		"position": var2str(origin),
 		"rotation": 0.0,
@@ -144,7 +142,7 @@ func _create_path(polygon: Array, level = null, closed: bool = true, settings = 
 		"grow": settings.active_grow,
 		"shrink": settings.active_shrink,
 		"block_light": settings.active_block_light,
-		"loop": false,
+		"loop": closed,
 	}
 	var path_index = 0 if settings.active_sorting == 1 else -1
 	var loaded_path = BuildingPlannerUtils.load_path(_parent_mod.Global, pathways, path_data, settings.active_color, path_index)

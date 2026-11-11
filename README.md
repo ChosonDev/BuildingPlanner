@@ -1,6 +1,6 @@
 # Building Planner
 
-**Version:** 1.2.10
+**Version:** 1.3.0
 **Author:** Choson  
 **Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.4.5+)
 
@@ -34,8 +34,8 @@ hash tracks texture/color/style changes; offset/direction/smoothing preparation 
 also reused when only appearance changes. Marker revisions trigger a cheap target
 check; distant edits preserve the current preview. Clicks resolve fresh geometry
 and settings again.
-Dialogs, panels, map/tool changes and unload clear the preview. Room Builder keeps
-its existing marker preview; Roof preview remains a separate stage. Preview
+Dialogs, panels, map/tool changes and unload clear the preview. Room Builder draws
+floor and Wall/Path textures alongside its marker preview; Roof preview remains a separate stage. Preview
 textures are drawn above the map so they remain visible; final layer occlusion
 and lighting are assessed after placement.
 Camera changes redraw screen-sized annotations, while retained texture geometry
@@ -90,7 +90,7 @@ Existing rooms retain their saved offset when boolean operations rebuild them.
 Open Paths/Lines require 0. A nonzero offset that collapses the contour or produces
 multiple contours (including holes) cancels placement with a log message; room
 placement rolls back as one operation. The room cursor preview shows the source
-footprint, not the offset outline.
+footprint together with the textured offset outline.
 
 Reverse direction works with open and closed Path markers, Shape contours and
 both Room Builder outlines. It reverses a copy after offset: open paths run from
@@ -104,7 +104,8 @@ follow the new traversal direction.
 ### Path Builder
 Click anywhere inside a Shape marker to trace a **closed path** along its outline.
 Nearby Path markers use the same 100-world-unit nearest-marker check as Wall
-Builder. Open markers retain their endpoints; closed markers close the path.
+Builder. Open markers retain their endpoints. Closed markers and markers with
+coincident endpoints use native Loop, smoothing the closing join without a duplicate vertex.
 Crossing and collinear polylines are supported. Older GuidesLines APIs without
 the geometry query retain the Shape workflow.
 
@@ -229,7 +230,9 @@ clipped polygons. Acts as a no-op when no existing markers overlap the click pos
 #### Additional behaviours
 
 - **Live preview** — a translucent shape polygon follows the cursor while the mode is active,
-  mirroring the current GuidesLines Shape parameters.
+  mirroring the current GuidesLines Shape parameters. Floor and Wall/Path textures
+  follow the room settings, including No fill, offsets and template transforms.
+  Boolean modes show the placement footprint rather than the final boolean result.
 - **Grid snap** — click position is snapped to the Dungeondraft grid when *IsSnapping* is
   enabled. The optional **Lievven.Snappy_Mod** is detected automatically at map load and used
   for custom snap intervals when present.
@@ -246,7 +249,7 @@ clipped polygons. Acts as a no-op when no existing markers overlap the click pos
 Optional: **Lievven.Snappy_Mod** — detected automatically; no configuration needed.  
 Optional: **[ColourAndModifyThings](https://github.com/Uchideshi/ColourAndModifyThings)** — enables path color picker in Path Builder and Room Builder (color persists across map reloads).
 
-BuildingPlanner 1.2.10 requires GuidesLines 2.4.5 or later, including its template,
+BuildingPlanner 1.3.0 requires GuidesLines 2.4.5 or later, including its template,
 geometry and history-capture APIs. Dungeondraft's manifest dependency list records
 mod IDs only; install the required GuidesLines version separately. Missing API
 capabilities disable the affected preview and placement before changing the map.

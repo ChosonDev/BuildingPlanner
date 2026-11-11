@@ -14,6 +14,8 @@ const CLASS_NAME = "BuildingPlannerOverlay"
 const Utils = preload("../utils/BuildingPlannerUtils.gd")
 const TexturePreview = preload("BuildingPlannerTexturePreview.gd")
 var _texture_preview = null
+var _room_previews = []
+var _room_preview_state = []
 # ponytail: synchronous marker scans; use indexed query candidates if dense maps stall.
 const QUERY_INTERVAL = 1.0 / 15.0
 var preview = {}
@@ -46,6 +48,8 @@ class PreviewDiagnostic:
 		error(message)
 
 func clear_preview() -> void:
+	for renderer in _room_previews: renderer.clear_preview()
+	_room_preview_state = []
 	if preview.empty() and _context.empty(): return
 	if is_instance_valid(_texture_preview):
 		_texture_preview.clear_preview()
@@ -65,6 +69,43 @@ func clear_preview() -> void:
 	_position = Vector2(INF, INF)
 	_elapsed = QUERY_INTERVAL
 	update()
+
+func refresh_room_preview(room, position: Vector2, state: Dictionary) -> void:
+	var geometry = room.get_preview_geometry(position, state)
+	if geometry.empty():
+		clear_preview()
+		return
+	var fill_settings = room._pattern_fill.get_settings()
+	var path = room.active_outline_mode == room.OutlineMode.PATH
+	var outline_settings = (room._path_builder if path else room._wall_builder).get_settings()
+	var key = [geometry, fill_settings, outline_settings, path]
+	if key == _room_preview_state: return
+	if not preview.empty() or not _context.empty(): clear_preview()
+	for j in range(geometry.size() * 2, _room_previews.size()):
+		_room_previews[j].clear_preview()
+	_room_preview_state = key
+	for i in range(geometry.size()):
+		while _room_previews.size() < (i + 1) * 2:
+			var renderer = TexturePreview.new()
+			add_child(renderer)
+			_room_previews.append(renderer)
+		var marker = geometry[i]
+		var fill = marker.marker_type == "Shape" or marker.get("closed", false)
+		var points = marker.polygon if marker.marker_type == "Shape" else marker.outline_points
+		var outline = Utils.region_outline({"polygon": points, "source_polygons": [points]}) if fill else {"points": points, "closed": false}
+		var contours = Utils.prepare_outlines(outline, outline_settings)
+		if contours.empty():
+			_room_previews[i * 2].clear_preview()
+			_room_previews[i * 2 + 1].clear_preview()
+			continue
+		if fill:
+			_room_previews[i * 2].sync_preview({"points": points, "fill": true, "closed": true}, fill_settings, false, room._parent_mod)
+		else:
+			_room_previews[i * 2].clear_preview()
+		if path:
+			for j in range(contours.size()):
+				contours[j] = Utils.path_preview_points(contours[j], fill, outline_settings.active_smoothness)
+		_room_previews[i * 2 + 1].sync_preview({"points": contours[0], "contours": contours, "closed": fill, "fill": false}, outline_settings, path, room._parent_mod)
 
 func _unavailable(reason: String) -> void:
 	if preview.size() == 1 and preview.get("reason") == reason: return

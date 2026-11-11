@@ -44,6 +44,8 @@ class Preview:
 	var position = Vector2.ZERO
 	var hidden = false
 	var state = {}
+	func get_preview_geometry(_point, _state):
+		return []
 	func update_preview(point, current_state):
 		position = point
 		hidden = false

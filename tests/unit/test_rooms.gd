@@ -767,7 +767,7 @@ func test_boolean_cuts_preserve_room_style_and_outline_across_undo_redo():
 					assert_eq(entry.settings.outline.active_offset, -2.0)
 					var data = entry.walls[0].Save()
 					var points = Array(str2var(data.edit_points))
-					points.pop_back()
+					assert_true(data.loop)
 					for i in range(points.size()): points[i] += str2var(data.position)
 					var expected = room._path_builder.BuildingPlannerUtils.offset_outline(TRIANGLE, true, -2.0)
 					expected = [expected[0], expected[2], expected[1]]
@@ -925,4 +925,122 @@ func test_history_owns_settings_snapshots_across_registry_replacement_and_replay
 	assert_eq(action._before[1].settings.fill.active_color, Color.white)
 	assert_eq(action._after[1].settings.fill.active_color, Color.red)
 	action.dropped(0)
+	yield(get_tree(), "idle_frame")
+
+class CountedPreview:
+	extends Node2D
+	var clear_calls = 0
+	func clear_preview():
+		clear_calls += 1
+		hide()
+	func sync_preview(_preview, _settings, _path, _parent):
+		clear_preview() # Match the real renderer's lifecycle.
+		show()
+
+
+func test_room_preview_and_placement_handle_lost_or_missing_api():
+	var state = {"ready": true, "active_marker_type": "Shape", "active_shape_radius": 1.0, "active_shape_angle": 0.0, "active_shape_sides": 4}
+	var room = make_room(0)
+	var expired_api = Node.new()
+	expired_api.free()
+	for api in [null, expired_api, Reference.new()]:
+		room._gl_api = api
+		assert_eq(room.get_preview_geometry(Vector2.ZERO, state), [])
+		assert_false(room.build_room_at(Vector2.ZERO, state))
+	assert_true(records.empty())
+	assert_eq(Room.new(null, null).get_preview_geometry(Vector2.ZERO, state), [])
+
+
+func test_regular_room_preview_preserves_vertices_and_rejects_nonfinite_or_collapsed_geometry():
+	var room = make_room(0)
+	room._parent_mod.Global.World.Level["TileMap"] = {"CellSize": Vector2(100, 100)}
+	var state = {"ready": true, "active_shape_radius": 1.0, "active_shape_angle": 25.0, "active_shape_sides": 64}
+	var points = room.get_preview_geometry(Vector2(200, 300), state)[0].polygon
+	assert_eq(points.size(), 64)
+	for i in range(points.size()):
+		var angle = TAU * i / 64 + deg2rad(25.0)
+		assert_true(points[i].distance_to(Vector2(200, 300) + Vector2(cos(angle), sin(angle)) * 100) < 0.001)
+	for radius in [1.0e308, 1.0e-30]:
+		state.active_shape_radius = radius
+		assert_eq(room.get_preview_geometry(Vector2.ZERO, state), [])
+
+
+func test_room_preview_clears_active_renderers_once_and_hides_unused_slots():
+	var root = ProjectSettings.globalize_path("res://").plus_file("..")
+	var setup = make_template_room(0)
+	var room = setup.room
+	var overlay = autofree(load(root.plus_file("scripts/overlay/BuildingPlannerOverlay.gd")).new())
+	for _i in range(4):
+		var renderer = CountedPreview.new()
+		overlay.add_child(renderer)
+		overlay._room_previews.append(renderer)
+	var state = setup.api.get_placement_state()
+	overlay.refresh_room_preview(room, Vector2.ZERO, state)
+	for renderer in overlay._room_previews:
+		assert_true(renderer.visible)
+		renderer.clear_calls = 0
+	overlay.refresh_room_preview(room, Vector2(100, 200), state)
+	for renderer in overlay._room_previews: assert_eq(renderer.clear_calls, 1)
+	state = {"ready": true, "active_marker_type": "Shape", "active_shape_radius": 1.0, "active_shape_angle": 0.0, "active_shape_sides": 4}
+	overlay.refresh_room_preview(room, Vector2.ZERO, state)
+	for i in range(2, 4):
+		assert_false(overlay._room_previews[i].visible)
+	room._wall_builder.active_offset = -1000.0
+	overlay.refresh_room_preview(room, Vector2.ZERO, state)
+	for renderer in overlay._room_previews: assert_false(renderer.visible, "Collapsed inset clears previous geometry")
+	release_template_room(setup)
+	yield(get_tree(), "idle_frame")
+
+
+func test_room_textured_preview_matches_placement_settings_and_clears_without_map_objects():
+	var root = ProjectSettings.globalize_path("res://").plus_file("..")
+	var Utils = load(root.plus_file("scripts/utils/BuildingPlannerUtils.gd"))
+	var setup = make_template_room(0)
+	var room = setup.room
+	var overlay = autofree(load(root.plus_file("scripts/overlay/BuildingPlannerOverlay.gd")).new())
+	var state = {"ready": true, "active_marker_type": "Shape", "active_shape_radius": 1.0, "active_shape_angle": 0.0, "active_shape_sides": 4}
+	var position = Vector2(200, 300)
+	var level = room._parent_mod.Global.World.Level
+	room._pattern_fill.active_texture = GradientTexture.new()
+	room._wall_builder.active_texture = GradientTexture.new()
+	var before = setup.api.get_markers()
+	overlay.refresh_room_preview(room, position, state)
+	assert_eq(overlay._room_previews.size(), 2)
+	var fill = overlay._room_previews[0]
+	var outline = overlay._room_previews[1]
+	assert_eq(Array(fill._polygon.polygon), [Vector2(300, 300), Vector2(200, 400), Vector2(100, 300), Vector2(200, 200)])
+	assert_true(fill._polygon.texture == room._pattern_fill.active_texture)
+	assert_true(outline._line.texture == room._wall_builder.active_texture)
+	room._pattern_fill.active_color = Color.red
+	room._pattern_fill.active_rotation = 90.0
+	room._path_builder.active_texture = GradientTexture.new()
+	room._path_builder.active_offset = 10.0
+	room.active_outline_mode = 1
+	overlay.refresh_room_preview(room, position, state)
+	assert_true(overlay._room_previews[0] == fill, "Retain renderers when settings change")
+	assert_eq(fill._polygon.color, Color.red)
+	assert_true(outline._line.texture == room._path_builder.active_texture)
+	var smooth = Utils.path_preview_points(Utils.prepare_outlines(Utils.region_outline({"polygon": Array(fill._polygon.polygon), "source_polygons": []}), room._path_builder.get_settings())[0], true, 0.0)
+	assert_eq(Array(outline._line.points), smooth + [smooth[0]], "Stock Godot closes Loop previews with an explicit seam")
+	room._pattern_fill.active_texture = null
+	overlay.refresh_room_preview(room, position, state)
+	assert_false(fill.visible, "No fill hides only the floor")
+	assert_true(outline.visible)
+	room.adjust_angle(45)
+	room.adjust_scale(0.5)
+	overlay.refresh_room_preview(room, position, state)
+	assert_ne(Array(outline._line.points), [], "Scroll transforms keep an outline")
+	state = setup.api.get_placement_state()
+	overlay.refresh_room_preview(room, position, state)
+	assert_eq(overlay._room_previews.size(), 4, "Template members each receive a floor and outline renderer")
+	assert_eq_deep(setup.api.get_markers(), before)
+	for container in [level.PatternShapes, level.Walls, level.Pathways]: assert_eq(container.get_child_count(), 0)
+	state.ready = false
+	overlay.refresh_room_preview(room, position, state)
+	for renderer in overlay._room_previews: assert_false(renderer.visible)
+	state.ready = true
+	overlay.refresh_room_preview(room, position, state)
+	overlay.clear_preview()
+	for renderer in overlay._room_previews: assert_null(renderer._polygon.texture)
+	release_template_room(setup)
 	yield(get_tree(), "idle_frame")

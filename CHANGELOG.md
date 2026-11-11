@@ -5,6 +5,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.3.0] — 2026-11-12
+
+### Added
+- Room Builder previews the selected floor and Wall/Path textures, including
+  template members, offsets, rotation and scale. Boolean modes preview the placement footprint.
+
+### Fixed
+- Treat Path markers with coincident endpoints as closed. Closed paths use native
+  Loop with a smoothed join, matching the textured preview and undo/redo data.
+- Guard Room Builder placement and previews against a missing or freed GuidesLines API.
+- Avoid clearing active Room Builder texture renderers twice per update; clear unused
+  template slots and invalid outlines so stale previews do not remain visible.
+- Validate generated regular room preview polygons in linear time, retaining finite
+  coordinate and nonzero-area checks without pairwise edge intersection tests.
+
+### Validation
+- All 162 standalone tests pass (2804 assertions). User testing confirmed the
+  changes working in Dungeondraft.
+
 ## [1.2.10] — 2026-11-10
 
 ### Fixed

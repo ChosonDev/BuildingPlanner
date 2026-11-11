@@ -60,13 +60,14 @@ func test_successful_path_records_the_loaded_node_and_undo_redo_works():
 	assert_eq(history.records.size(), 1, "A successful build must be undoable")
 	var record = history.records[0]
 	assert_true(record._node == pathways.get_child(0))
-	assert_eq(pathways.get_child(0).points.size(), 4, "Outline is closed")
+	assert_eq(pathways.get_child(0).points.size(), 3, "Native Loop closes the outline without a duplicate vertex")
+	assert_true(pathways.received_data.loop)
 	record.undo()
 	assert_eq(pathways.get_child_count(), 0)
 	yield(get_tree(), "idle_frame")
 	record.redo()
 	assert_eq(pathways.get_child_count(), 1)
-	assert_eq(pathways.get_child(0).points.size(), 4)
+	assert_eq(pathways.get_child(0).points.size(), 3)
 	# Release the test's parent -> history -> record -> parent cycle.
 	history.records.clear()
 
@@ -105,7 +106,7 @@ func test_direct_path_data_keeps_geometry_options_and_under_sorting():
 	var polygon = [Vector2(70, 80), Vector2(110, 80), Vector2(70, 120)]
 	var path = builder._create_path(polygon)
 	assert_eq(path.get_index(), 0, "Under places the final node before existing siblings")
-	assert_eq_deep(Array(str2var(pathways.received_data.edit_points)), [Vector2.ZERO, Vector2(40, 0), Vector2(0, 40), Vector2.ZERO])
+	assert_eq_deep(Array(str2var(pathways.received_data.edit_points)), [Vector2.ZERO, Vector2(40, 0), Vector2(0, 40)])
 	assert_eq(str2var(pathways.received_data.position), polygon[0], "Keep the native SetEditPoints origin")
 	assert_eq(str2var(pathways.received_data.scale), Vector2.ONE)
 	assert_eq(pathways.received_data.rotation, 0.0)
@@ -118,7 +119,7 @@ func test_direct_path_data_keeps_geometry_options_and_under_sorting():
 	assert_true(pathways.received_data.grow)
 	assert_false(pathways.received_data.shrink)
 	assert_true(pathways.received_data.block_light)
-	assert_false(pathways.received_data.loop)
+	assert_true(pathways.received_data.loop)
 	assert_false(pathways.received_data.has("node_id"), "Native loader allocates a new world ID")
 	builder.active_sorting = 0
 	assert_eq(builder._create_path(polygon).get_index(), 2, "Over appends after existing siblings")

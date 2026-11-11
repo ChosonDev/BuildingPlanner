@@ -330,7 +330,7 @@ func test_textured_preview_host_per_point_taper_and_loop_normalization_are_used(
 	for i in range(12): points.append(Vector2(i * 10, 40))
 	renderer.sync_preview({"points": points, "closed": true, "fill": false}, style, true)
 	assert_true(renderer._line.Super)
-	assert_false(renderer._line.loop, "Native paths use explicit smoothed seam, not Loop")
+	assert_true(renderer._line.loop, "Closed native paths use Loop")
 	assert_false(renderer._line.normalize_uv)
 	assert_eq(renderer._line.widths[0], 0.0)
 	assert_eq(renderer._line.widths[3], 14.0) # 1 - ease(1/4, -2) = 0.875 of width 16.

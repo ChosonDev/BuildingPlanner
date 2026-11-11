@@ -137,7 +137,8 @@ static func parse_path_outline(marker, logger = null) -> Dictionary:
 			return {}
 		if points.empty() or points[-1] != point:
 			points.append(point)
-	if closed and points.size() > 1 and points[-1] == points[0]:
+	if points.size() > 1 and points[-1].is_equal_approx(points[0]):
+		closed = true
 		points.pop_back()
 	if points.size() < 2:
 		if logger: logger.error("BuildingPlanner: invalid Path marker data from GuidesLinesApi (id=%s)." % str(marker.get("id")))
@@ -199,10 +200,10 @@ static func prepare_outline(points: Array, closed: bool, settings: Dictionary, l
 		result = reverse_outline(result, closed)
 	return result
 
-## Match Pathway.Smooth / LineSmoothing.SmoothLineChaikin, including the explicit seam.
+## Match Pathway.Smooth / LineSmoothing.SmoothLineChaikin, including native loops.
 ## Grow/Shrink and fade affect width/alpha, not this centerline.
 static func path_preview_points(points: Array, closed: bool, smoothness: float) -> Array:
-	var count = points.size() + (1 if closed else 0)
+	var count = points.size()
 	if count < 2:
 		return []
 	var iterations = 1 if count > 100 else (2 if count > 30 else (3 if count > 10 else 4))
@@ -210,17 +211,16 @@ static func path_preview_points(points: Array, closed: bool, smoothness: float) 
 	var result = []
 	for point in points:
 		result.append(point - origin) # Native smoothing operates on local float coordinates.
-	if closed:
-		result.append(Vector2.ZERO)
 	if result.size() == 2:
 		result.insert(1, (result[0] + result[1]) * 0.5)
 	var cut = 0.05 + clamp(smoothness * 0.5, 0.0, 1.0) * 0.4
 	for _iteration in range(iterations):
-		var next = [result[0]]
-		for i in range(result.size() - 1):
-			next.append((1.0 - cut) * result[i] + cut * result[i + 1])
-			next.append(cut * result[i] + (1.0 - cut) * result[i + 1])
-		next.append(result[-1])
+		var next = [] if closed else [result[0]]
+		for i in range(result.size() if closed else result.size() - 1):
+			var end = result[(i + 1) % result.size()]
+			next.append((1.0 - cut) * result[i] + cut * end)
+			next.append(cut * result[i] + (1.0 - cut) * end)
+		if not closed: next.append(result[-1])
 		result = next
 	for i in range(result.size()):
 		result[i] += origin

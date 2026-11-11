@@ -65,8 +65,7 @@ func test_nested_outlines_build_preview_and_grouped_history_match_for_walls_and_
 			var points = data.get("points", [])
 			if mode == "PathBuilder":
 				points = Array(str2var(data.edit_points))
-				assert_eq(points[0], points[-1])
-				points.pop_back()
+				assert_true(data.loop)
 				for i in range(points.size()): points[i] += str2var(data.position)
 			var expected = Utils.prepare_outlines(Utils.resolve_outline(f.api, Vector2.ZERO), f.feature.get_settings())
 			assert_true(points in expected, "Every native object is one prepared boundary")

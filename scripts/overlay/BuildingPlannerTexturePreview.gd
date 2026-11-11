@@ -179,8 +179,7 @@ func _draw_outline(points: Array, closed: bool, settings: Dictionary, path: bool
 	var color = settings.active_color
 	var width = texture.get_height() * (settings.active_width if path else 1.0)
 	var joint = Line2D.LINE_JOINT_SHARP if path else settings.active_joint
-	# PathBuilder's saved loop is false: its explicit seam is already in the smoothed points.
-	_set_line(_line, points, closed and not path, texture, width, Color.white if path else color, joint, _path_normalize_uv if path else true)
+	_set_line(_line, points, closed, texture, width, Color.white if path else color, joint, _path_normalize_uv if path else true)
 	for property in ["super", "Super"]:
 		if _line_properties.has(property):
 			_line.set(property, path)

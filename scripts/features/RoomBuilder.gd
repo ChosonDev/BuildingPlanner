@@ -138,6 +138,29 @@ func stop_preview() -> void:
 		_gl_api.clear_shape_preview()
 	_preview_active = false
 
+## Read-only placement footprint; never create temporary markers for a preview.
+func get_preview_geometry(world_pos: Vector2, state: Dictionary) -> Array:
+	var template = state.get("active_marker_type") == "Template"
+	var args = [1] if template else _shape_args(state)
+	if not _can_build(world_pos, state, args): return []
+	if template: return _template_batch(world_pos)
+	var level = BuildingPlannerUtils.resolve_level(_parent_mod)
+	var tile_map = level.get("TileMap") if level else null
+	if tile_map == null: return []
+	var cell = tile_map.CellSize
+	if not cell is Vector2 or cell.x <= 0 or cell.y <= 0 or is_inf(cell.x) or is_inf(cell.y) or is_nan(cell.x) or is_nan(cell.y): return []
+	var points = []
+	for i in range(args[2]):
+		var angle = TAU * i / args[2] + deg2rad(args[1])
+		var point = world_pos + Vector2(cos(angle), sin(angle)) * args[0] * min(cell.x, cell.y)
+		if is_nan(point.x) or is_nan(point.y) or is_inf(point.x) or is_inf(point.y): return []
+		points.append(point)
+	# ponytail: generated regular polygons cannot self-intersect; keep only linear validity checks.
+	var area = BuildingPlannerUtils.signed_area(points)
+	if is_nan(area) or is_inf(area) or abs(area) <= 0.125: return []
+	# ponytail: preview the placement footprint in boolean modes; exact results need a read-only boolean preview API.
+	return [{"marker_type": "Shape", "polygon": points}]
+
 ## Map-scoped associations must survive tool switches but never map changes.
 func on_map_changed() -> void:
 	_registry.clear()
@@ -227,7 +250,7 @@ func _can_build(coords: Vector2, state: Dictionary, args: Array) -> bool:
 		return false
 	if active_outline_mode != OutlineMode.WALL and active_outline_mode != OutlineMode.PATH:
 		return false
-	return not (is_nan(coords.x) or is_nan(coords.y) or is_inf(coords.x) or is_inf(coords.y)) and _gl_api.is_ready()
+	return not (is_nan(coords.x) or is_nan(coords.y) or is_inf(coords.x) or is_inf(coords.y)) and is_instance_valid(_gl_api) and _gl_api.has_method("is_ready") and _gl_api.is_ready()
 
 func _template_batch(coords: Vector2) -> Array:
 	var batch = _gl_api.get_template_markers(coords, -1, shape_angle_offset, shape_scale_factor)

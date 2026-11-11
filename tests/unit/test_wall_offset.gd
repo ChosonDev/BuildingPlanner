@@ -115,8 +115,7 @@ func test_path_offset_preserves_width_and_replays_actual_world_geometry():
 		assert_true(path.build_at(Vector2(150, 250)))
 		var saved = container.get_child(0).Save(false)
 		var points = Array(str2var(saved.edit_points))
-		assert_eq(points[0], points[-1], "Native path has an explicit closing seam")
-		points.pop_back()
+		assert_true(saved.loop, "Native Loop closes the outline")
 		var origin = str2var(saved.position)
 		for i in range(points.size()): points[i] += origin
 		assert_eq_deep(points, Utils.offset_outline(SQUARE, true, distance))

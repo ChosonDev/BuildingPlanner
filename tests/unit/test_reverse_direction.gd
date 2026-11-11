@@ -48,9 +48,7 @@ func test_reverse_direction_builders_after_offset_and_saved_style_history():
 				var saved = container.get_child(0).Save()
 				var actual = saved.points if name == "WallBuilder" else Array(str2var(saved.edit_points))
 				if name == "PathBuilder":
-					if closed:
-						assert_eq(actual[0], actual[-1])
-						actual.pop_back()
+					assert_eq(saved.loop, closed)
 					for i in range(actual.size()): actual[i] += str2var(saved.position)
 				var offset = Utils.offset_outline(POINTS, closed, distance)
 				var expected = [offset[0], offset[3], offset[2], offset[1]] if closed else [POINTS[3], POINTS[2], POINTS[1], POINTS[0]]

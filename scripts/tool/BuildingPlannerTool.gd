@@ -165,6 +165,8 @@ func Update(_delta):
 	if _active_mode == Mode.ROOM_BUILDER and _room_builder and cached_worldui:
 		_refresh_shape_state()
 		_room_builder.update_preview(room_position(cached_worldui.MousePosition), gl_tool_state)
+		if is_instance_valid(_overlay):
+			_overlay.refresh_room_preview(_room_builder, room_position(cached_worldui.MousePosition), gl_tool_state)
 	elif is_instance_valid(_overlay):
 		var feature = null
 		match _active_mode:

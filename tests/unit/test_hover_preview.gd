@@ -469,8 +469,9 @@ func test_hover_preview_smoothing_matches_known_host_chaikin_coordinates_and_sea
 	assert_almost_eq(smooth[1].x, 0.000625, 0.000001)
 	assert_eq(smooth[1].y, 0.0)
 	var closed = Utils.path_preview_points(points, true, 1.0)
-	assert_eq(closed[0], points[0])
-	assert_eq(closed[-1], points[0])
+	assert_eq(closed.size(), 48, "Loop smoothing processes all three edges each iteration")
+	assert_ne(closed[0], points[0], "The seam is smoothed like every other corner")
+	assert_ne(closed[-1], closed[0], "Native Loop owns the closing segment")
 	assert_eq(points.size(), 3)
 
 func test_hover_preview_rejects_degenerate_geometry_and_ignores_malformed_source_metadata():

@@ -49,8 +49,9 @@ func test_open_and_closed_path_markers_create_wall_and_path_with_repeatable_hist
 				assert_eq_deep(saved.points, [Vector2(70, 80), Vector2(120, 80), Vector2(120, 130)])
 			else:
 				var points = Array(str2var(saved.edit_points))
-				assert_eq(points.size(), 4 if closed else 3)
-				assert_eq(points[-1], Vector2.ZERO if closed else Vector2(50, 50))
+				assert_eq(points.size(), 3)
+				assert_eq(points[-1], Vector2(50, 50))
+				assert_eq(saved.loop, closed)
 				assert_eq(str2var(saved.position), Vector2(70, 80))
 			for _cycle in range(2):
 				history.records[0].undo()
@@ -72,6 +73,30 @@ func test_outline_falls_back_to_shape_without_a_nearby_path_and_on_older_apis():
 	assert_eq(api.fills, 3)
 	var legacy = path_fixture.MarkerApi.new() # No geometry query on this public API substitute.
 	assert_true(Utils.resolve_outline(legacy, Vector2.ZERO).closed)
+
+func test_coincident_path_endpoints_create_native_loop_without_duplicate_seam_and_restore_history():
+	var api = MarkerApi.new()
+	var paths = autofree(path_fixture.Pathways.new())
+	var history = path_fixture.HistoryApi.new()
+	var parent = {"Global": {"World": {"Level": {"Pathways": paths}}, "API": {"HistoryApi": history}, "ModMapData": {}}}
+	var builder = load(root.plus_file("scripts/features/PathBuilder.gd")).new(api, null, parent)
+	builder.active_texture = GradientTexture.new()
+	for end in [[70, 80], [70.00001, 80]]:
+		api.nearest = {"id": 4, "marker_type": "Path", "path_closed": false, "marker_points": [[70, 80], [170, 80], [170, 180], end]}
+		var before = api.nearest.duplicate(true)
+		assert_true(builder.build_at(Vector2(100, 80)))
+		var saved = paths.get_child(0).Save()
+		assert_true(saved.loop)
+		assert_eq(Array(str2var(saved.edit_points)).size(), 3)
+		assert_eq_deep(api.nearest, before)
+		var record = history.records.back()
+		record.undo()
+		yield(get_tree(), "idle_frame")
+		record.redo()
+		assert_eq_deep(paths.get_child(0).Save(), saved)
+		record.undo()
+		history.records.clear()
+		yield(get_tree(), "idle_frame")
 
 
 func test_path_validation_keeps_open_collinear_crossing_and_closed_bridge_geometry():
