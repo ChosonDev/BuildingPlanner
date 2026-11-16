@@ -5,6 +5,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.3.1] — 2026-11-16
+
+### Added
+- Eyedropper buttons in all material panels, including Room Builder, copy
+  textures and supported settings from matching objects on the current level.
+  A miss, another input, or a tool/mode/level change cancels picking.
+
+### Fixed
+- Repeated picker clicks toggle correctly; modal windows retain their input.
+- Reject invalid sampled rotation and preserve numeric control steps and precision.
+- Avoid redundant preview clearing and hit tests on lower layers during picking.
+
+### Validation
+- All 168 standalone tests pass (2891 assertions), including native Godot button
+  input. Dungeondraft runtime validation remains outstanding.
+
 ## [1.3.0] — 2026-11-12
 
 ### Added

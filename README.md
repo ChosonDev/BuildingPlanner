@@ -1,6 +1,6 @@
 # Building Planner
 
-**Version:** 1.3.0
+**Version:** 1.3.1
 **Author:** Choson  
 **Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.4.5+)
 
@@ -11,6 +11,21 @@ Select the **Building Planner** tool in the *Design* category of the Dungeondraf
 then choose a mode from the sidebar.
 
 ## Features
+
+### Sample Picker
+Each material panel has a small eyedropper beside its search box, including
+the separate floor, wall and path panels in Room Builder. Click it, then
+left-click a matching object on the current level to copy its texture and all
+settings supported by that panel. A miss, another mouse button, wheel movement
+or any key cancels picking. Tool, mode and level changes cancel it too.
+Picking updates only the selected panel and never changes map objects or history.
+
+Patterns copy color, texture rotation, layer and outline; walls copy color,
+shadow and corners; paths copy width, smoothing, layer, fade, taper and light
+blocking (color still requires ColourAndModifyThings); roofs copy width, type
+and the level's sunlight settings. Builder offset, reverse direction, roof
+placement mode and Over/Under remain unchanged: native objects do not store
+those original builder choices.
 
 ### Hover Build Preview
 Pattern Fill previews the actual boolean region under the pointer. Wall and Path
@@ -249,7 +264,7 @@ clipped polygons. Acts as a no-op when no existing markers overlap the click pos
 Optional: **Lievven.Snappy_Mod** — detected automatically; no configuration needed.  
 Optional: **[ColourAndModifyThings](https://github.com/Uchideshi/ColourAndModifyThings)** — enables path color picker in Path Builder and Room Builder (color persists across map reloads).
 
-BuildingPlanner 1.3.0 requires GuidesLines 2.4.5 or later, including its template,
+BuildingPlanner 1.3.1 requires GuidesLines 2.4.5 or later, including its template,
 geometry and history-capture APIs. Dungeondraft's manifest dependency list records
 mod IDs only; install the required GuidesLines version separately. Missing API
 capabilities disable the affected preview and placement before changing the map.

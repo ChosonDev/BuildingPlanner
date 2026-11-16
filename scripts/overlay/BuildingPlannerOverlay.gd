@@ -334,16 +334,34 @@ func _input(event: InputEvent) -> void:
 	if not tool or not tool.is_enabled:
 		return
 
-	if not (event is InputEventMouseButton):
-		return
-
-	# Skip if any Dungeondraft window/popup is currently open.
-	# _input fires before Control._gui_input, so is_input_handled() is not yet set —
-	# we must check visible windows explicitly.
+	# _input precedes GUI dispatch: leave modal input to the host window.
 	var editor = tool.parent_mod.Global.Editor
 	for window in editor.Windows.values():
 		if is_instance_valid(window) and window.visible:
+			if tool.get("_sampling_panel") != null: tool.cancel_sampling()
 			return
+	if get_viewport().gui_has_modal_stack():
+		if tool.get("_sampling_panel") != null: tool.cancel_sampling()
+		return
+
+	if tool.get("_sampling_panel") != null:
+		if event is InputEventMouseButton and event.pressed:
+			var button = tool._sampling_panel.sample_button
+			# Let Button's release signal toggle the active picker exactly once.
+			if event.button_index == BUTTON_LEFT and is_instance_valid(button) and button.is_visible_in_tree() and button.get_global_rect().has_point(event.position): return
+			if event.button_index == BUTTON_LEFT and tool.is_mouse_on_canvas():
+				tool.handle_canvas_click(tool.cached_worldui.MousePosition)
+				get_tree().set_input_as_handled()
+			else:
+				tool.cancel_sampling()
+				if tool.is_mouse_on_canvas(): get_tree().set_input_as_handled()
+		elif (event is InputEventKey or event is InputEventJoypadButton) and event.pressed:
+			tool.cancel_sampling()
+			get_tree().set_input_as_handled()
+		return
+
+	if not (event is InputEventMouseButton):
+		return
 
 	# Skip if Ctrl is held — reserved for camera zoom.
 	if event.control:

@@ -244,6 +244,55 @@ class FeaturePanel:
 	var _populated = false
 	var _selection_path = null
 	var _restoring = false
+	var _controls = {}
+	var sample_button = null
+	var sample_category = ""
+
+	func apply_sample(settings: Dictionary) -> void:
+		var texture = settings.texture
+		var path = texture.resource_path
+		var index = _index_to_path.find(path)
+		if index < 0:
+			# Missing/filtered native catalog entries still have a usable map texture.
+			_index_to_path = _index_to_path.duplicate()
+			_index_to_path.append(path)
+			_sg._all_items = _sg._all_items.duplicate()
+			_sg._all_items.append({"icon": texture, "tooltip": path.get_file().get_basename()})
+			_sg._search_texts.append(path.get_file().get_basename().to_lower())
+			index = _index_to_path.size() - 1
+		_sg._search_edit.text = ""
+		_sg._selected_original = index
+		_sg._rebuild_list("")
+		_sg._grid_menu.ensure_current_is_visible()
+		_selection_path = path
+		_populated = true
+		for setting in settings:
+			var value = settings[setting]
+			if _controls.has(setting):
+				var control = _controls[setting]
+				control.set_block_signals(true)
+				if control is OptionButton:
+					if setting == "layer":
+						var found = false
+						for i in range(control.get_item_count()):
+							if control.get_item_id(i) == value: found = true
+						if not found: control.add_item(str(value) + ": Sample layer", value)
+						_select_layer_option(value)
+					else: control.select(value)
+				elif control is BaseButton: control.pressed = bool(value)
+				elif control is Range:
+					control.min_value = min(control.min_value, value)
+					control.max_value = max(control.max_value, value)
+					var step = control.step
+					control.step = 0.0
+					control.value = value
+					control.step = step
+					if control is SpinBox: control.get_line_edit().text = str(control.value)
+					value = control.value
+				control.set_block_signals(false)
+			_set_field(setting, value)
+		if color_picker and settings.has("color"): color_picker.color = settings.color
+		if get("_shade_sub") != null: get("_shade_sub").visible = settings.get("shade", false)
 
 	# Catalogs are shared read-only by panels and cleared by UI on map change/unload.
 	# Do not cache an empty/late host catalog: the next activation must retry it.
@@ -333,6 +382,7 @@ class FeaturePanel:
 		layer_option = OptionButton.new()
 		layer_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		layer_option.connect("item_selected", self, "_on_layer_changed")
+		_controls["layer"] = layer_option
 		parent.add_child(layer_option)
 
 	func _add_option(parent, text: String, items: Array, setting: String):
@@ -342,6 +392,7 @@ class FeaturePanel:
 		for item in items:
 			control.add_item(item)
 		control.connect("item_selected", self, "_set_field_from_signal", [setting])
+		_controls[setting] = control
 		parent.add_child(control)
 		return control
 
@@ -356,6 +407,7 @@ class FeaturePanel:
 		control.text = text
 		control.pressed = pressed
 		control.connect("toggled", self, "_set_field_from_signal", [setting])
+		_controls[setting] = control
 		parent.add_child(control)
 		return control
 
@@ -368,6 +420,7 @@ class FeaturePanel:
 		control.value = value
 		control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		control.connect("value_changed", self, "_set_field_from_signal", [setting])
+		_controls[setting] = control
 		parent.add_child(control)
 		return control
 
@@ -383,6 +436,12 @@ class FeaturePanel:
 	func _add_grid(parent):
 		_sg = SearchableGrid.new()
 		parent.add_child(_sg.build())
+		sample_button = Button.new()
+		sample_button.text = "Pick"
+		sample_button.toggle_mode = true
+		sample_button.focus_mode = Control.FOCUS_NONE
+		sample_button.hint_tooltip = "Pick a sample from the map. Left-click a matching object; any other key cancels."
+		_sg._search_edit.get_parent().add_child(sample_button)
 		_sg.on_item_selected = funcref(self, "_on_texture_selected")
 
 	func _set_field_from_signal(value, setting: String) -> void:
@@ -565,6 +624,7 @@ class WallPanel:
 		bevel_check.text = "Bevel corners"
 		bevel_check.pressed = true
 		bevel_check.connect("toggled", self, "_on_bevel_toggled")
+		_controls["joint"] = bevel_check
 		sec.add_child(bevel_check)
 
 		return sec
@@ -748,6 +808,7 @@ class RoofPanel:
 		shade_check.text = "Sunlight Shading (all roofs)"
 		shade_check.hint_tooltip = "Applied to all roofs on this level when placing a roof."
 		shade_check.connect("toggled", self, "_on_shade_toggled")
+		_controls["shade"] = shade_check
 		sec.add_child(shade_check)
 
 		_shade_sub = VBoxContainer.new()
@@ -946,8 +1007,19 @@ func build(panel):
 	_rf_section = _rf_roof_panel.build()
 	root.add_child(_rf_section)
 
+	var mod_root = _tool.parent_mod.Global.get("Root")
+	var icon = Image.new()
+	var sample_icon = null
+	if mod_root != null and icon.load(mod_root + "icons/eyedropper.svg") == OK:
+		sample_icon = ImageTexture.new()
+		sample_icon.create_from_image(icon)
 	for section in _all_panels:
 		section._sg._editor = _tool.parent_mod.Global.get("Editor")
+		section.sample_category = "Patterns" if section is PatternPanel else ("Walls" if section is WallPanel else ("Paths" if section is PathPanel else "Roofs"))
+		if sample_icon:
+			section.sample_button.icon = sample_icon
+			section.sample_button.text = ""
+		section.sample_button.connect("pressed", _tool, "start_sampling", [section])
 
 	# Show only the first mode's section
 	_show_section(Mode.PATTERN_FILL)
@@ -1049,6 +1121,60 @@ func _build_room_builder_section() -> VBoxContainer:
 
 func get_selected_mode() -> int:
 	return _mode_selector.get_item_id(_mode_selector.selected) if _mode_selector else Mode.PATTERN_FILL
+
+## Native hit tests use the current mouse and respect transformed object geometry.
+func sample_at(panel, level, position: Vector2) -> bool:
+	var containers = {"Patterns": "PatternShapes", "Walls": "Walls", "Paths": "Pathways", "Roofs": "Roofs"}
+	var container = level.get(containers[panel.sample_category])
+	if not is_instance_valid(container): return false
+	var patterns = panel.sample_category == "Patterns"
+	var takes_position = panel.sample_category == "Walls" or panel.sample_category == "Paths"
+	var groups = container.get_children() if patterns else [container]
+	# ponytail: one scan per click, like SelectTool; use a spatial index for very large maps.
+	var chosen = null
+	var chosen_layer = -INF
+	for group in groups:
+		for node in group.get_children():
+			if not is_instance_valid(node) or node.is_queued_for_deletion() or not node is Node2D: continue
+			if not node.is_visible_in_tree() or not node.has_method("IsMouseWithin") or not node.has_method("Save"): continue
+			if node.has_meta("preview") and node.get_meta("preview"): continue
+			var layer = node.GetLayer() if patterns else node.z_index
+			if layer < chosen_layer: continue
+			var hit = node.IsMouseWithin(position) if takes_position else node.IsMouseWithin()
+			if hit:
+				chosen = node
+				chosen_layer = layer
+	if chosen == null: return false
+	var settings = read_sample(panel.sample_category, chosen)
+	if settings.empty(): return false
+	if panel.sample_category == "Paths" and panel.color_picker.disabled: settings.color = Color.white
+	panel.apply_sample(settings)
+	return true
+
+static func read_sample(category: String, node) -> Dictionary:
+	var settings = {}
+	match category:
+		"Patterns":
+			var rotation = node.get("_Rotation")
+			if not (rotation is float or rotation is int) or is_nan(float(rotation)) or is_inf(float(rotation)): return {}
+			settings = {"texture": node.get("_Texture"), "color": node.color, "rotation": fposmod(rad2deg(rotation), 360.0), "layer": node.GetLayer(), "outline": node.get("HasOutline")}
+		"Walls":
+			settings = {"texture": node.get("Texture"), "color": node.get("Color"), "shadow": node.get("HasShadow"), "joint": node.get("Joint")}
+		"Paths":
+			var texture = node.texture
+			if not texture is Texture or texture.get_height() <= 0: return {}
+			settings = {"texture": texture, "color": node.modulate, "width": node.width / texture.get_height(), "smoothness": node.get("Smoothness"), "layer": node.z_index, "fade_in": node.get("FadeIn"), "fade_out": node.get("FadeOut"), "grow": node.get("Grow"), "shrink": node.get("Shrink"), "block_light": node.get("BlockLight")}
+		"Roofs":
+			var data = node.Save()
+			var roofs = node.get_parent()
+			settings = {"texture": node.get("TilesTexture"), "width": data.get("width"), "type": data.get("type"), "shade": roofs.get("Shade"), "sun_direction": roofs.get("SunDirection"), "shade_contrast": roofs.get("ShadeContrast")}
+	# Native nodes do not retain builder offset/reversal/placement or Over/Under intent.
+	# Keep those draft settings rather than guessing them from the resulting geometry.
+	if not settings.get("texture") is Texture or settings.texture.resource_path == "": return {}
+	for value in settings.values():
+		if value == null: return {}
+		if (value is float or value is int) and (is_nan(float(value)) or is_inf(float(value))): return {}
+	return settings
 
 func update_active_mode(mode: int, gl) -> void:
 	if mode == Mode.PATH_BUILDER or mode == Mode.ROOM_BUILDER:

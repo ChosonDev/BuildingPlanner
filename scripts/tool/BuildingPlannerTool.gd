@@ -59,6 +59,26 @@ var _preview_level = null
 
 var tool_panel = null
 var _ui = null
+var _sampling_panel = null
+var _sampling_level = null
+
+func start_sampling(panel) -> void:
+	var was_sampling = _sampling_panel == panel
+	cancel_sampling()
+	if was_sampling or not is_enabled or not is_instance_valid(cached_world) or not is_instance_valid(cached_world.Level): return
+	_sampling_panel = panel
+	_sampling_level = cached_world.Level
+	panel.sample_button.pressed = true
+	if _ui: _ui.release_search_focus()
+	_clear_previews()
+	Input.set_default_cursor_shape(Input.CURSOR_CROSS)
+
+func cancel_sampling() -> void:
+	if _sampling_panel == null: return
+	if is_instance_valid(_sampling_panel.sample_button): _sampling_panel.sample_button.pressed = false
+	_sampling_panel = null
+	_sampling_level = null
+	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 
 # ============================================================================
 # INIT
@@ -131,6 +151,7 @@ func Enable():
 
 # Called when the user switches away from this tool.
 func Disable():
+	cancel_sampling()
 	is_enabled = false
 	if _ui:
 		_ui.release_search_focus()
@@ -154,6 +175,9 @@ func Update(_delta):
 	if not is_instance_valid(_overlay) and is_instance_valid(cached_worldui):
 		_create_overlay()
 	var level = cached_world.Level if cached_world != null else null
+	if _sampling_panel != null:
+		if level != _sampling_level: cancel_sampling()
+		return
 	if level != _preview_level:
 		_clear_previews()
 		_preview_level = level
@@ -292,6 +316,7 @@ func create_ui_panel():
 # ============================================================================
 
 func _set_mode(mode: int):
+	cancel_sampling()
 	if mode != _active_mode:
 		_clear_previews()
 	_active_mode = mode
@@ -303,6 +328,13 @@ func _set_mode(mode: int):
 ## Dispatch canvas actions here so the overlay only owns input guards.
 ## Return whether a loaded mode accepted the click, independently of build success.
 func handle_canvas_click(world_pos: Vector2) -> bool:
+	if _sampling_panel != null:
+		var panel = _sampling_panel
+		var level = _sampling_level
+		cancel_sampling()
+		if is_instance_valid(cached_world) and cached_world.Level == level:
+			_ui.sample_at(panel, level, world_pos)
+		return true
 	var feature = null
 	match _active_mode:
 		Mode.PATTERN_FILL:
