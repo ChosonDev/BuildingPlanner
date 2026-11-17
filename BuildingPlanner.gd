@@ -63,7 +63,7 @@ func start():
 
 		if self.Global.API and self.Global.API.has("Logger"):
 			LOGGER = self.Global.API.Logger.for_class(CLASS_NAME)
-			LOGGER.info("Mod starting - version 1.3.1")
+			LOGGER.info("Mod starting - version 1.3.2")
 
 			# Register UpdateChecker for version tracking in the Mod Versions menu
 			if self.Global.API.has("UpdateChecker"):
@@ -104,6 +104,7 @@ func update(_delta):
 
 	if _tool:
 		_tool.set_world_references(Global.World, Global.WorldUI)
+		_tool.update_room_templates()
 
 	# Require a loaded map before doing anything else
 	if Global.World == null or Global.WorldUI == null:

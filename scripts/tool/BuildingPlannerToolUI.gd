@@ -250,9 +250,9 @@ class FeaturePanel:
 
 	func apply_sample(settings: Dictionary) -> void:
 		var texture = settings.texture
-		var path = texture.resource_path
+		var path = texture.resource_path if texture is Texture else ""
 		var index = _index_to_path.find(path)
-		if index < 0:
+		if index < 0 and texture is Texture:
 			# Missing/filtered native catalog entries still have a usable map texture.
 			_index_to_path = _index_to_path.duplicate()
 			_index_to_path.append(path)
@@ -916,6 +916,14 @@ var _pb_path_panel = null   # PathPanel
 
 # Room Builder section
 var _rb_section               = null
+var _rb_templates = null
+var _rb_template_add = null
+var _rb_template_rename = null
+var _rb_template_delete = null
+var _rb_template_status = null
+var _rb_name_dialog = null
+var _rb_name_edit = null
+var _rb_renaming_template = null
 var _rb_sub_mode_selector     = null   # OptionButton
 var _rb_pattern_panel         = null   # PatternPanel
 var _rb_outline_mode_selector = null   # OptionButton (Wall / Path)
@@ -1076,6 +1084,7 @@ func _build_room_builder_section() -> VBoxContainer:
 	_rb_sub_mode_selector.selected = 0
 	_rb_sub_mode_selector.connect("item_selected", self, "_on_rb_sub_mode")
 	sec.add_child(_rb_sub_mode_selector)
+	_build_room_templates(sec)
 	_rb_override_label = FeaturePanel._label("")
 	sec.add_child(_rb_override_label)
 	var reset = Button.new()
@@ -1114,6 +1123,138 @@ func _build_room_builder_section() -> VBoxContainer:
 	sec.add_child(_rb_path_container)
 
 	return sec
+
+func _build_room_templates(sec):
+	var row = HBoxContainer.new()
+	sec.add_child(row)
+	_rb_templates = OptionButton.new()
+	_rb_templates.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rb_templates.clip_text = true
+	_rb_templates.hint_tooltip = "Room styles saved with this map. Select New template to capture the current settings."
+	_rb_templates.connect("item_selected", self, "_on_room_template_selected")
+	row.add_child(_rb_templates)
+	for entry in [["Add", "_on_room_template_add"], ["Rename", "_on_room_template_rename"], ["Delete", "_on_room_template_delete"]]:
+		var button = Button.new()
+		button.text = entry[0]
+		button.connect("pressed", self, entry[1])
+		row.add_child(button)
+		match entry[0]:
+			"Add": _rb_template_add = button
+			"Rename": _rb_template_rename = button
+			"Delete": _rb_template_delete = button
+	_rb_template_status = FeaturePanel._label("")
+	_rb_template_status.autowrap = true
+	sec.add_child(_rb_template_status)
+	_rb_name_dialog = ConfirmationDialog.new()
+	_rb_name_dialog.window_title = "Rename room template"
+	_rb_name_dialog.rect_min_size = Vector2(320, 100)
+	_rb_name_edit = LineEdit.new()
+	_rb_name_edit.max_length = 120
+	_rb_name_edit.connect("text_entered", self, "_on_room_name_entered")
+	_rb_name_edit.connect("focus_entered", self, "_on_room_name_focus", [true])
+	_rb_name_edit.connect("focus_exited", self, "_on_room_name_focus", [false])
+	_rb_name_dialog.add_child(_rb_name_edit)
+	_rb_name_dialog.connect("confirmed", self, "_on_room_name_confirmed")
+	sec.add_child(_rb_name_dialog)
+	rebuild_room_templates()
+
+func rebuild_room_templates():
+	if not _rb_templates: return
+	_rb_templates.clear()
+	for template in _tool.room_templates: _rb_templates.add_item(template.name)
+	_rb_templates.add_item("New template")
+	_rb_templates.select(_tool.active_room_template if _tool.active_room_template >= 0 else _tool.room_templates.size())
+	_rb_templates.disabled = _tool.room_templates.empty()
+	var existing = _tool.active_room_template >= 0
+	_rb_template_add.visible = not existing
+	_rb_template_add.disabled = not _tool._templates_writable
+	_rb_template_rename.visible = existing
+	_rb_template_delete.visible = existing
+	_rb_template_status.text = "" if _tool._templates_writable else "Room templates could not be loaded; original map data is preserved."
+	if _rb_name_dialog: _rb_name_dialog.hide()
+
+func _on_room_template_add():
+	# Include defaults of hidden outline panels before taking the snapshot.
+	var gl = _tool.parent_mod.Global
+	for panel in [_rb_pattern_panel, _rb_wall_panel, _rb_path_panel]: panel.try_build_grid_menu(gl)
+	if _tool.add_room_template(): rebuild_room_templates()
+	else: _rb_template_status.text = "Cannot save template: select a valid GuidesLines shape or template first."
+
+func _on_room_template_selected(index):
+	if _tool.select_room_template(index): rebuild_room_templates()
+	else:
+		_rb_templates.select(_tool.active_room_template if _tool.active_room_template >= 0 else _tool.room_templates.size())
+		_rb_template_status.text = "Cannot load template: a required texture is unavailable. See the log."
+
+func _on_room_template_delete():
+	var index = _tool.active_room_template
+	if index < 0 or index >= _tool.room_templates.size(): return
+	_tool.room_templates.remove(index)
+	_tool.select_room_template(-1)
+	rebuild_room_templates()
+
+func _on_room_template_rename():
+	var index = _tool.active_room_template
+	if index < 0 or index >= _tool.room_templates.size(): return
+	_rb_renaming_template = _tool.room_templates[index]
+	_rb_name_edit.text = _rb_renaming_template.name
+	_rb_name_dialog.popup_centered()
+	_rb_name_edit.grab_focus()
+	_rb_name_edit.select_all()
+
+func _on_room_name_entered(_text):
+	_on_room_name_confirmed()
+
+func _on_room_name_focus(focused):
+	if _tool and _tool.parent_mod and is_instance_valid(_tool.parent_mod.Global.Editor):
+		_tool.parent_mod.Global.Editor.SearchHasFocus = focused
+
+func _on_room_name_confirmed():
+	var text = _rb_name_edit.text.strip_edges()
+	if text.empty() or not _rb_renaming_template in _tool.room_templates: return
+	_rb_renaming_template.name = text
+	if _rb_name_edit.has_focus(): _rb_name_edit.release_focus()
+	_rb_renaming_template = null
+	rebuild_room_templates()
+
+func apply_room_template(template) -> bool:
+	var panels = [_rb_pattern_panel, _rb_wall_panel, _rb_path_panel]
+	var restored = []
+	var asset_script = _tool.parent_mod.get("Script")
+	# Resolve every asset before touching settings, so missing packs cannot apply half a style.
+	for i in range(3):
+		var settings = template.panels[i].duplicate(true)
+		var path = settings.texture
+		settings.texture = null
+		if path != "":
+			if i == 0:
+				# Patterns include colorable/custom-pack assets outside Library["Patterns"].
+				if ResourceLoader.has_cached(path) or ResourceLoader.exists(path, "Texture") or File.new().file_exists(path):
+					settings.texture = _rb_pattern_panel._load_texture_safe(path)
+			else:
+				if not asset_script or not asset_script.has_method("GetAssetList") or not asset_script.has_method("GetAssetTexture"): return false
+				var category = "Walls" if i == 1 else "Paths"
+				# Native GetAssetTexture indexes Reverse[path] and throws for a missing asset.
+				if path in asset_script.GetAssetList(category): settings.texture = asset_script.GetAssetTexture(category, path)
+			if not settings.texture is Texture:
+				if LOGGER: LOGGER.warn("Room template texture is unavailable: %s" % path)
+				return false
+		restored.append(settings)
+	for i in range(3):
+		panels[i].try_build_grid_menu(_tool.parent_mod.Global)
+		panels[i].apply_sample(restored[i])
+	_rb_path_panel.update_camt_color_state(_tool.parent_mod.Global)
+	if _rb_path_panel.color_picker.disabled:
+		_rb_path_panel.color_picker.color = Color.white
+		_rb_path_panel._set_field("color", Color.white)
+	_rb_sub_mode_selector.select(template.sub_mode)
+	_on_rb_sub_mode(template.sub_mode)
+	_rb_outline_mode_selector.select(template.outline_mode)
+	_on_rb_outline_mode(template.outline_mode)
+	_tool._room_builder.shape_angle_offset = template.angle
+	_tool._room_builder.shape_scale_factor = template.scale
+	update_room_overrides()
+	return true
 
 # ============================================================================
 # GRID MENU LIFECYCLE
@@ -1225,6 +1366,8 @@ func try_build_grid_menus(mode: int) -> void:
 
 ## Release only owned search edits, preserving focus in other tools.
 func release_search_focus() -> void:
+	if is_instance_valid(_rb_name_edit) and _rb_name_edit.has_focus():
+		_rb_name_edit.release_focus()
 	for panel in _all_panels:
 		if panel and panel._sg:
 			panel._sg.release_search_focus()

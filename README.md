@@ -1,6 +1,6 @@
 # Building Planner
 
-**Version:** 1.3.1
+**Version:** 1.3.2
 **Author:** Choson  
 **Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.4.5+)
 
@@ -169,6 +169,18 @@ Roof style defaults initialize per map; tool switches preserve your choices.
 ---
 
 ### Room Builder
+The style dropdown below **Sub-mode** starts with a disabled **New template** entry
+and an **Add** button. Add captures the current room mode, shape or GuidesLines
+template/group geometry, rotation/scale, floor settings and both Wall/Path styles.
+The saved entry is selected and exposes **Rename** and **Delete**. Select
+**New template** at the end of the list to return to the live GuidesLines shape
+source and save another style. Editing controls does not overwrite saved styles.
+
+Room templates belong to the current map and are included in normal saves and
+backups. Select a saved style to restore its settings; its geometry remains
+independent of later GuidesLines edits or deleted source templates. Required asset
+packs must still be installed. Missing textures leave the current settings intact.
+
 One-click room creation — places a pattern fill **and** a closed outline simultaneously,
 using the current GuidesLines Shape parameters (radius, angle, sides), or the
 selected template/group when the GuidesLines **Template** tab is active.
@@ -264,7 +276,7 @@ clipped polygons. Acts as a no-op when no existing markers overlap the click pos
 Optional: **Lievven.Snappy_Mod** — detected automatically; no configuration needed.  
 Optional: **[ColourAndModifyThings](https://github.com/Uchideshi/ColourAndModifyThings)** — enables path color picker in Path Builder and Room Builder (color persists across map reloads).
 
-BuildingPlanner 1.3.1 requires GuidesLines 2.4.5 or later, including its template,
+BuildingPlanner 1.3.2 requires GuidesLines 2.4.5 or later, including its template,
 geometry and history-capture APIs. Dungeondraft's manifest dependency list records
 mod IDs only; install the required GuidesLines version separately. Missing API
 capabilities disable the affected preview and placement before changing the map.

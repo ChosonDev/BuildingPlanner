@@ -36,6 +36,7 @@ var _shape_parameters = [0.0, 0.0, 0]
 var _supported_modes = []
 var _supports_preview = false
 var _supports_templates = false
+var room_template = null # Selected independent RoomTemplate, or live GuidesLines state.
 const SUB_MODE_METHODS = ["place_shape_marker_plain", "place_shape_merge", "place_shape_conforming", "place_shape_wrapping", "apply_shape_difference"]
 const REQUIRED_API_METHODS = ["delete_marker", "is_ready", "begin_history_capture", "end_history_capture"]
 
@@ -114,6 +115,9 @@ func update_preview(world_pos: Vector2, state: Dictionary) -> void:
 	if not _gl_api:
 		return
 	if state.get("active_marker_type") == "Template":
+		if room_template != null:
+			stop_preview() # The owned room overlay draws the saved geometry.
+			return
 		if not _can_build(world_pos, state, [1]) or not _gl_api.has_method("set_template_preview") or not _gl_api.has_method("clear_shape_preview"):
 			stop_preview()
 			return
@@ -253,7 +257,7 @@ func _can_build(coords: Vector2, state: Dictionary, args: Array) -> bool:
 	return not (is_nan(coords.x) or is_nan(coords.y) or is_inf(coords.x) or is_inf(coords.y)) and is_instance_valid(_gl_api) and _gl_api.has_method("is_ready") and _gl_api.is_ready()
 
 func _template_batch(coords: Vector2) -> Array:
-	var batch = _gl_api.get_template_markers(coords, -1, shape_angle_offset, shape_scale_factor)
+	var batch = room_template.transformed_geometry(coords, shape_angle_offset, shape_scale_factor) if room_template != null else _gl_api.get_template_markers(coords, -1, shape_angle_offset, shape_scale_factor)
 	if not batch is Array: return []
 	batch = batch.duplicate(true)
 	for marker in batch:

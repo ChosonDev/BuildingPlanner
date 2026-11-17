@@ -5,6 +5,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.3.2] — 2026-11-17
+
+### Fixed
+- Load RoomTemplates when their map-data block arrives after World initialization;
+  refresh the dropdown without requiring another map change and keep own saves
+  from resetting the current selection.
+- Restore RoomTemplate patterns through the pattern panel's loader, including
+  colorable and raw custom-pack textures. Check native Wall/Path catalogs before
+  resolving textures so missing packs cannot abort switching with an index error.
+- Refresh saved shape state immediately on selection, clear previews when returning
+  to New template, and respect unavailable optional path coloring.
+
+### Added
+- Map-scoped RoomTemplate styles with Add, Rename and Delete below Room Builder's
+  sub-mode selector. Capture shape/group geometry, rotation/scale and all floor,
+  wall and path settings; restore styles independently of their GuidesLines source.
+- Normal saves and backups persist room templates; invalid map data is preserved
+  and unavailable textures prevent partial style application.
+
 ## [1.3.1] — 2026-11-16
 
 ### Added
@@ -16,10 +35,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Repeated picker clicks toggle correctly; modal windows retain their input.
 - Reject invalid sampled rotation and preserve numeric control steps and precision.
 - Avoid redundant preview clearing and hit tests on lower layers during picking.
-
-### Validation
-- All 168 standalone tests pass (2891 assertions), including native Godot button
-  input. Dungeondraft runtime validation remains outstanding.
 
 ## [1.3.0] — 2026-11-12
 
@@ -35,10 +50,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   template slots and invalid outlines so stale previews do not remain visible.
 - Validate generated regular room preview polygons in linear time, retaining finite
   coordinate and nonzero-area checks without pairwise edge intersection tests.
-
-### Validation
-- All 162 standalone tests pass (2804 assertions). User testing confirmed the
-  changes working in Dungeondraft.
 
 ## [1.2.10] — 2026-11-10
 
@@ -61,10 +72,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Fixed
 - Clear previews over panels and dialogs and on map, level or tool changes;
   use the host panel font for preview messages. Hover leaves map history untouched.
-
-### Validation
-- All 151 standalone tests pass (2606 assertions). User testing confirmed the
-  changes working in Dungeondraft.
 
 ## [1.2.8] — 2026-11-09
 

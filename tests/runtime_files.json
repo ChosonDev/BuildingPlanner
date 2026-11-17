@@ -54,6 +54,10 @@
       ]
     },
     {
+      "path": "scripts/features/RoomTemplate.gd",
+      "args": []
+    },
+    {
       "path": "scripts/features/WallBuilder.gd",
       "args": [
         null,

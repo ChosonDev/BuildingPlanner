@@ -5,6 +5,14 @@ extends Reference
 # and delegates work to feature modules.
 
 const CLASS_NAME = "BuildingPlannerTool"
+const RoomTemplate = preload("../features/RoomTemplate.gd")
+const ROOM_DATA_KEY = "Choson.BuildingPlanner"
+var room_templates = []
+var active_room_template = -1
+var _templates_world = null
+var _templates_source = null
+var _templates_editor = null
+var _templates_writable = true
 
 # ============================================================================
 # DEPENDENCIES
@@ -206,6 +214,10 @@ func _clear_previews() -> void:
 		_room_builder.stop_preview()
 
 func _refresh_shape_state() -> void:
+	if active_room_template >= 0 and active_room_template < room_templates.size():
+		gl_tool_state = room_templates[active_room_template].state.duplicate(true)
+		gl_tool_state["ready"] = is_instance_valid(_gl_api) and _gl_api.has_method("is_ready") and _gl_api.is_ready()
+		return
 	if _gl_api and _gl_api.has_method("get_placement_state"):
 		gl_tool_state = _gl_api.get_placement_state()
 	elif _gl_api and _gl_api.has_method("get_shape_state"):
@@ -228,6 +240,7 @@ func set_world_references(world, worldui):
 
 func shutdown():
 	Disable()
+	_disconnect_template_editor()
 	if _ui:
 		_ui.shutdown()
 		_ui = null
@@ -237,6 +250,118 @@ func shutdown():
 	if _room_builder:
 		_room_builder.on_map_changed()
 	parent_mod = null
+
+func _room_style_defaults() -> Array:
+	var result = []
+	for feature in [_room_builder._pattern_fill, _room_builder._wall_builder, _room_builder._path_builder]:
+		var settings = {}
+		for key in feature.get_settings(): settings[key.trim_prefix("active_")] = feature.get(key)
+		result.append(settings)
+	return result
+
+func _disconnect_template_editor():
+	if is_instance_valid(_templates_editor) and _templates_editor.is_connected("OnSaveBegin", self, "_save_room_templates"):
+		_templates_editor.disconnect("OnSaveBegin", self, "_save_room_templates")
+	_templates_editor = null
+
+# Poll even while another tool is active: autosave and map changes still apply.
+func update_room_templates():
+	var global = parent_mod.Global
+	if global.Editor != _templates_editor:
+		_disconnect_template_editor()
+		_templates_editor = global.Editor
+		if is_instance_valid(_templates_editor) and _templates_editor.has_signal("OnSaveBegin"):
+			_templates_editor.connect("OnSaveBegin", self, "_save_room_templates")
+	var world = global.World if global.WorldUI != null else null
+	var source = global.ModMapData.get(ROOM_DATA_KEY) if world != null else null
+	# Map data may arrive after World; do not cache an early empty load forever.
+	if world == _templates_world and source == _templates_source: return
+	if world != null and _room_builder == null: return
+	_templates_world = world
+	_templates_source = source
+	room_templates = []
+	active_room_template = -1
+	_templates_writable = true
+	if _room_builder: _room_builder.room_template = null
+	if world != null:
+		load_room_templates(global.ModMapData)
+	if _ui: _ui.rebuild_room_templates()
+
+func load_room_templates(map_data: Dictionary) -> bool:
+	_templates_source = map_data.get(ROOM_DATA_KEY)
+	room_templates = []
+	active_room_template = -1
+	if _room_builder: _room_builder.room_template = null
+	_templates_writable = true
+	if not map_data.has(ROOM_DATA_KEY): return true
+	var data = map_data[ROOM_DATA_KEY]
+	if not data is Dictionary or data.get("version") != 1 or not data.get("room_templates") is Array:
+		_templates_writable = false
+	else:
+		for saved in data.room_templates:
+			var template = RoomTemplate.new()
+			if not template.load_data(saved, _room_style_defaults()):
+				_templates_writable = false
+				break
+			room_templates.append(template)
+	if not _templates_writable:
+		room_templates = []
+		if LOGGER: LOGGER.warn("Room templates could not be loaded. Original map data will be preserved.")
+	return _templates_writable
+
+func _save_room_templates(_path = "", _backup = false):
+	update_room_templates()
+	if _templates_world == null or not _templates_writable: return
+	var saved = []
+	for template in room_templates: saved.append(template.save())
+	var data = {"version": 1, "room_templates": saved}
+	parent_mod.Global.ModMapData[ROOM_DATA_KEY] = data
+	_templates_source = data # An owned save is not an external map load.
+
+func add_room_template() -> bool:
+	if not _templates_writable or _room_builder == null or cached_world == null: return false
+	_refresh_shape_state()
+	if not gl_tool_state.get("ready", false): return false
+	var template = RoomTemplate.new()
+	template.name = "Room template %d" % (room_templates.size() + 1)
+	template.sub_mode = _room_builder.active_sub_mode
+	template.outline_mode = _room_builder.active_outline_mode
+	template.angle = _room_builder.shape_angle_offset
+	template.scale = _room_builder.shape_scale_factor
+	for key in ["active_shape_radius", "active_shape_angle", "active_shape_sides", "active_color"]:
+		template.state[key] = gl_tool_state.get(key)
+	template.state["active_marker_type"] = "Template" if gl_tool_state.get("active_marker_type") == "Template" else "Shape"
+	if template.state.active_marker_type == "Template":
+		if not _gl_api.has_method("get_template_markers"): return false
+		template.geometry = _gl_api.get_template_markers(Vector2.ZERO)
+	template.panels = _room_style_defaults()
+	for settings in template.panels:
+		settings.texture = settings.texture.resource_path if settings.texture is Texture else ""
+	# Validate captured state with the same boundary used for map loading.
+	if not template.load_data(template.save(), _room_style_defaults()):
+		if LOGGER: LOGGER.warn("Room template could not be captured; check the current shape and assets.")
+		return false
+	room_templates.append(template)
+	active_room_template = room_templates.size() - 1
+	_room_builder.room_template = template
+	return true
+
+func select_room_template(index: int) -> bool:
+	if index < 0 or index >= room_templates.size():
+		cancel_sampling()
+		_clear_previews()
+		active_room_template = -1
+		if _room_builder: _room_builder.room_template = null
+		_refresh_shape_state()
+		return true
+	if not _room_builder or not _ui: return false
+	if not _ui.apply_room_template(room_templates[index]): return false
+	cancel_sampling()
+	_clear_previews()
+	active_room_template = index
+	_room_builder.room_template = room_templates[index]
+	_refresh_shape_state()
+	return true
 
 func is_mouse_on_canvas() -> bool:
 	if not is_instance_valid(cached_worldui) or not cached_worldui.IsInsideBounds:
