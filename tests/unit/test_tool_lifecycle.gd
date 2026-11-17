@@ -81,13 +81,13 @@ func test_canvas_dispatch_routes_every_mode_and_only_snaps_rooms():
 	tool.cached_worldui = autofree(WorldCanvas.new())
 	tool.cached_worldui.MousePosition = Vector2(99, 99) # Click coordinates, not the live cursor, drive placement.
 	tool._gl_api = ShapeState.new()
-	for field in ["_pattern_fill", "_wall_builder", "_path_builder", "_room_builder", "_roof_builder"]:
+	for field in ["_pattern_fill", "_wall_builder", "_path_builder", "_room_builder", "_roof_builder", "_water_fill"]:
 		tool.set(field, CanvasFeature.new())
-	for mode in [tool.Mode.PATTERN_FILL, tool.Mode.WALL_BUILDER, tool.Mode.PATH_BUILDER, tool.Mode.ROOM_BUILDER, tool.Mode.ROOF_BUILDER]:
+	for mode in [tool.Mode.PATTERN_FILL, tool.Mode.WALL_BUILDER, tool.Mode.PATH_BUILDER, tool.Mode.ROOM_BUILDER, tool.Mode.ROOF_BUILDER, tool.Mode.WATER_FILL]:
 		tool._active_mode = mode
 		assert_true(tool.handle_canvas_click(Vector2(13, 27)), "Loaded mode consumes even an unsuccessful placement")
 	assert_eq_deep(tool._pattern_fill.calls, [["build", Vector2(13, 27)]])
-	for feature in [tool._wall_builder, tool._path_builder, tool._roof_builder]:
+	for feature in [tool._wall_builder, tool._path_builder, tool._roof_builder, tool._water_fill]:
 		assert_eq_deep(feature.calls, [["build", Vector2(13, 27)]])
 	assert_eq_deep(tool._room_builder.calls, [["room", Vector2(10, 30), {"active_shape_angle": 15}]])
 	tool._active_mode = -1
@@ -481,6 +481,7 @@ func test_all_searches_suppress_shortcuts_and_release_on_map_change():
 	tool._ui = ui
 	for section in ui._all_panels:
 		# Exercise every search independently of section visibility.
+		if not section._sg: continue
 		section._sg._search_edit.emit_signal("focus_entered")
 		assert_true(editor.SearchHasFocus)
 		section._sg._search_edit.emit_signal("focus_exited")

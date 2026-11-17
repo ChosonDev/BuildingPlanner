@@ -889,6 +889,93 @@ class RoofPanel:
 		_set_field("shade", pressed)
 
 # ============================================================================
+# WATER FILL PANEL
+# ============================================================================
+
+class WaterPanel:
+	extends FeaturePanel
+	var deep_picker = null
+	var shallow_picker = null
+	var blend_spin = null
+	var border_check = null
+	var level_label = null
+	var _mesh = null
+	var _global = null
+	var _style_mesh_id = 0
+
+	func build() -> VBoxContainer:
+		var sec = VBoxContainer.new()
+		sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		level_label = _label("Current map level | Water layer (0)")
+		sec.add_child(level_label)
+		deep_picker = _add_water_color(sec, "Deep water:", "deep_color", Color("3aa19a"))
+		shallow_picker = _add_water_color(sec, "Shallow water:", "shallow_color", Color("8bceb0"))
+		blend_spin = _add_range(sec, "Blend distance (tiles):", "blend_distance", 0.5, 4.0, 0.1, 1.5)
+		border_check = CheckButton.new()
+		border_check.text = "Disable border (entire level)"
+		border_check.disabled = true
+		border_check.connect("toggled", self, "_on_border_toggled")
+		sec.add_child(border_check)
+		var note = _label("Click inside a Shape marker to fill.\nTouching water regions merge.\nTextures: native water and shore.\nCustom water textures are not saved\nby Dungeondraft.")
+		sec.add_child(note)
+		return sec
+
+	func _add_water_color(sec, text, setting, value):
+		sec.add_child(_label(text))
+		var picker = ColorPickerButton.new()
+		picker.color = value
+		picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		picker.connect("color_changed", self, "_set_field_from_signal", [setting])
+		sec.add_child(picker)
+		return picker
+
+	func bind_feature(value) -> void:
+		if is_instance_valid(feature) and feature.is_connected("border_changed", self, "_on_border_changed"):
+			feature.disconnect("border_changed", self, "_on_border_changed")
+		.bind_feature(value)
+		if feature:
+			feature.connect("border_changed", self, "_on_border_changed")
+		if border_check: border_check.disabled = feature == null or not is_instance_valid(_mesh)
+
+	func sync_level_settings(gl, refresh_border = false) -> void:
+		_global = gl
+		var level = BuildingPlannerUtils.resolve_level({"Global": gl})
+		var mesh = level.get("WaterMesh") if level != null else null
+		border_check.disabled = feature == null or not is_instance_valid(mesh)
+		level_label.text = "Level: %s | Water layer (0)" % str(level.get("Label")) if level != null else "Open a map to fill water."
+		if mesh == _mesh:
+			if refresh_border and is_instance_valid(mesh): _on_border_changed(mesh, mesh.Save().get("disable_border", false))
+			return
+		_mesh = mesh
+		if not is_instance_valid(mesh): return
+		if _style_mesh_id != 0 and _style_mesh_id != mesh.get_instance_id(): _settings.clear()
+		_style_mesh_id = mesh.get_instance_id()
+		# Native defaults belong to this level. Draft edits survive tool switches.
+		for entry in [["deep_color", mesh.DeepColor, deep_picker], ["shallow_color", mesh.ShallowColor, shallow_picker], ["blend_distance", mesh.BlendDistance, blend_spin]]:
+			var value = _settings.get(entry[0], entry[1])
+			if entry[2] is ColorPickerButton: entry[2].color = value
+			else: entry[2].value = value
+			_set_field(entry[0], value)
+		_on_border_changed(mesh, mesh.Save().get("disable_border", false))
+
+	func _on_border_toggled(value):
+		if _restoring: return
+		var level = BuildingPlannerUtils.resolve_level({"Global": _global}) if _global != null else null
+		# Reject an event targeting a level that changed before this frame's update.
+		if feature and level != null and level.get("WaterMesh") == _mesh:
+			feature.set_border_disabled(value)
+
+	func _on_border_changed(mesh, disabled):
+		if mesh != _mesh: return
+		_restoring = true
+		border_check.pressed = disabled
+		_restoring = false
+
+	func release() -> void:
+		_mesh = null
+		_global = null
+
+# ============================================================================
 # REFERENCES
 # ============================================================================
 
@@ -935,6 +1022,8 @@ var _rb_path_container        = null   # VBoxContainer — shown when outline mo
 # Roof Builder section
 var _rf_section    = null
 var _rf_roof_panel = null   # RoofPanel
+var _wf_section = null
+var _wf_water_panel = null   # WaterPanel
 
 # ============================================================================
 # INIT
@@ -963,9 +1052,10 @@ func build(panel):
 	_rb_wall_panel    = WallPanel.new( _tool.parent_mod.get("Script"))
 	_rb_path_panel    = PathPanel.new( _tool.parent_mod.get("Script"))
 	_rf_roof_panel    = RoofPanel.new(LOGGER, _tool.parent_mod.get("Script"))
+	_wf_water_panel   = WaterPanel.new()
 
 	bind_features()
-	_all_panels = [_pf_pattern_panel, _wb_wall_panel, _pb_path_panel, _rb_pattern_panel, _rb_wall_panel, _rb_path_panel, _rf_roof_panel]
+	_all_panels = [_pf_pattern_panel, _wb_wall_panel, _pb_path_panel, _rb_pattern_panel, _rb_wall_panel, _rb_path_panel, _rf_roof_panel, _wf_water_panel]
 	for section in _all_panels:
 		section._catalogs = _catalogs
 		section.LOGGER = LOGGER
@@ -993,6 +1083,7 @@ func build(panel):
 	_mode_selector.add_item("Path Builder",  Mode.PATH_BUILDER)
 	_mode_selector.add_item("Room Builder",  Mode.ROOM_BUILDER)
 	_mode_selector.add_item("Roof Builder",  Mode.ROOF_BUILDER)
+	_mode_selector.add_item("Water Fill", Mode.WATER_FILL)
 	_mode_selector.selected = 0
 	_mode_selector.connect("item_selected", self, "_on_mode_selected")
 	root.add_child(_mode_selector)
@@ -1014,6 +1105,8 @@ func build(panel):
 
 	_rf_section = _rf_roof_panel.build()
 	root.add_child(_rf_section)
+	_wf_section = _wf_water_panel.build()
+	root.add_child(_wf_section)
 
 	var mod_root = _tool.parent_mod.Global.get("Root")
 	var icon = Image.new()
@@ -1022,6 +1115,7 @@ func build(panel):
 		sample_icon = ImageTexture.new()
 		sample_icon.create_from_image(icon)
 	for section in _all_panels:
+		if not section._sg: continue
 		section._sg._editor = _tool.parent_mod.Global.get("Editor")
 		section.sample_category = "Patterns" if section is PatternPanel else ("Walls" if section is WallPanel else ("Paths" if section is PathPanel else "Roofs"))
 		if sample_icon:
@@ -1051,6 +1145,7 @@ func bind_features() -> void:
 	_rb_wall_panel.bind_feature(_tool._room_builder._wall_builder if _tool._room_builder else null)
 	_rb_path_panel.bind_feature(_tool._room_builder._path_builder if _tool._room_builder else null)
 	_rf_roof_panel.bind_feature(_tool._roof_builder)
+	_wf_water_panel.bind_feature(_tool._water_fill)
 	if _rb_sub_mode_selector:
 		_on_rb_sub_mode(_rb_sub_mode_selector.selected)
 	if _rb_outline_mode_selector and _tool._room_builder:
@@ -1323,12 +1418,15 @@ func update_active_mode(mode: int, gl) -> void:
 		_rb_path_panel.update_camt_color_state(gl)
 	elif mode == Mode.ROOF_BUILDER:
 		sync_roof_settings(gl)
+	elif mode == Mode.WATER_FILL:
+		_wf_water_panel.sync_level_settings(gl)
 
 func sync_roof_settings(gl) -> void:
 	_rf_roof_panel.sync_level_settings(gl)
 
 func shutdown() -> void:
 	release_all_grid_menus()
+	if _wf_water_panel: _wf_water_panel.bind_feature(null)
 	_tool = null
 
 ## Populate only the active section; owned grids retain their data until map change.
@@ -1353,6 +1451,8 @@ func try_build_grid_menus(mode: int) -> void:
 				_rb_path_panel.update_camt_color_state(gl)
 		Mode.ROOF_BUILDER:
 			_rf_roof_panel.try_build_grid_menu(gl)
+		Mode.WATER_FILL:
+			_wf_water_panel.sync_level_settings(gl, true)
 	# Populate layer dropdowns with current map's user layers
 	_refresh_all_layer_options(gl)
 	# Subscribe to layers_changed so dropdowns stay in sync if ManageLayers
@@ -1393,6 +1493,7 @@ func _show_section(mode: int):
 	if _pb_section: _pb_section.visible = (mode == Mode.PATH_BUILDER)
 	if _rb_section: _rb_section.visible = (mode == Mode.ROOM_BUILDER)
 	if _rf_section: _rf_section.visible = (mode == Mode.ROOF_BUILDER)
+	if _wf_section: _wf_section.visible = (mode == Mode.WATER_FILL)
 	if _tool and _tool.is_enabled:
 		try_build_grid_menus(mode)
 	elif _tool and _tool.parent_mod:

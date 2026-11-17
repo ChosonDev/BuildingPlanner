@@ -1,6 +1,6 @@
 # Building Planner
 
-**Version:** 1.3.2
+**Version:** 1.3.3
 **Author:** Choson  
 **Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.4.5+)
 
@@ -77,6 +77,31 @@ Configurable settings in the sidebar:
 | Rotation | 0–360 ° in 1 ° steps |
 | Layer | Current map's user layers from LayerApi (default: 100, User Layer 1) |
 | Outline | Toggles a border around the filled polygon |
+
+---
+
+### Water Fill
+Click inside a Shape marker to fill the same resolved region as Pattern Fill with
+native Dungeondraft water. Nested marker islands are passed as a single bridged
+polygon. Touching water regions merge using the native water tool's rules; the
+new colors and blend distance apply to modified regions, while untouched regions
+keep their style.
+
+The panel provides deep and shallow colors, blend distance (0.5–4 tiles), and
+**Disable border (entire level)**. Border changes take effect immediately and
+have their own undo step. Each fill uses one native undo step recognized by _Lib.
+Draft colors do not alter the native brush's settings. Switching map levels
+initializes the panel from that level's native defaults.
+
+Water uses the current map level and the fixed native Water layer (0). Native
+water and shoreline textures are used: the host does not serialize custom water
+texture choices or a configurable water layer. Changing either would require a
+separate persistence/rendering extension. This initial implementation has no
+water hover preview or sample picker.
+
+Standalone checks pass and initial use in Dungeondraft is user-confirmed. Detailed
+undo/redo, island and save/reopen acceptance checks remain pending. See
+[implementation notes](tests/WATER_FILL_2026_11_17.md).
 
 ---
 
@@ -276,7 +301,7 @@ clipped polygons. Acts as a no-op when no existing markers overlap the click pos
 Optional: **Lievven.Snappy_Mod** — detected automatically; no configuration needed.  
 Optional: **[ColourAndModifyThings](https://github.com/Uchideshi/ColourAndModifyThings)** — enables path color picker in Path Builder and Room Builder (color persists across map reloads).
 
-BuildingPlanner 1.3.2 requires GuidesLines 2.4.5 or later, including its template,
+BuildingPlanner 1.3.3 requires GuidesLines 2.4.5 or later, including its template,
 geometry and history-capture APIs. Dungeondraft's manifest dependency list records
 mod IDs only; install the required GuidesLines version separately. Missing API
 capabilities disable the affected preview and placement before changing the map.

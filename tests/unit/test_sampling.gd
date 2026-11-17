@@ -108,6 +108,7 @@ func test_sampling_pattern_selects_hidden_catalog_entry_and_keeps_room_panel_ind
 	pattern.color = Color.orange
 	var panel = ui._pf_pattern_panel
 	for section in ui._all_panels:
+		if not section._sg: continue
 		assert_true(section.sample_button.icon is Texture)
 		assert_true(section.sample_button.is_connected("pressed", tool, "start_sampling"))
 	panel.refresh_layer_option({100: "Base", 200: "Custom"}, [100, 200])
@@ -278,6 +279,8 @@ func test_sampling_modal_input_is_not_consumed_and_lower_layers_skip_hit_tests()
 	var panel = tool._ui._pf_pattern_panel
 	var window = autofree(Control.new())
 	tool.parent_mod.Global.Editor.Windows["Test"] = window
+	# Godot registers new input/modal controls on the next frame.
+	yield(get_tree(), "idle_frame")
 	var key = InputEventKey.new()
 	key.pressed = true
 	key.scancode = KEY_A
@@ -290,6 +293,7 @@ func test_sampling_modal_input_is_not_consumed_and_lower_layers_skip_hit_tests()
 	var popup = autofree(PopupPanel.new())
 	add_child(popup)
 	popup.popup(Rect2(20, 20, 40, 40))
+	yield(get_tree(), "idle_frame")
 	tool.start_sampling(panel)
 	get_viewport().input(key)
 	assert_null(tool._sampling_panel, "Native modal stack also cancels sampling")

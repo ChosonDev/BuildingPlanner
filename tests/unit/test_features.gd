@@ -58,7 +58,7 @@ class MarkerApi:
 
 
 func test_builders_reject_missing_old_and_unready_api_before_map_access():
-	for name in ["PatternFill", "WallBuilder", "PathBuilder", "RoofBuilder"]:
+	for name in ["PatternFill", "WallBuilder", "PathBuilder", "RoofBuilder", "WaterFill"]:
 		var script = ResourceLoader.load(mod_root.plus_file("scripts/features/" + name + ".gd"))
 		var method = "build_at"
 		assert_false(script.new(null, null).call(method, Vector2.ZERO), name + ": absent API")
@@ -69,7 +69,7 @@ func test_builders_reject_missing_old_and_unready_api_before_map_access():
 
 
 func test_builders_reject_invalid_polygon_responses_without_map_objects():
-	for name in ["PatternFill", "WallBuilder", "PathBuilder", "RoofBuilder"]:
+	for name in ["PatternFill", "WallBuilder", "PathBuilder", "RoofBuilder", "WaterFill"]:
 		var script = ResourceLoader.load(mod_root.plus_file("scripts/features/" + name + ".gd"))
 		var method = "build_at"
 		var api = MarkerApi.new()

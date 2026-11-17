@@ -5,6 +5,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.3.3] — 2026-11-17
+
+### Added
+- Initial Water Fill mode: fill GuidesLines Shape regions with native water,
+  including bridged island contours and native single-step fill history.
+- Water settings panel with deep/shallow colors, native blend-distance range,
+  current level/layer information and level-wide border visibility with undo/redo.
+  Native water textures and the fixed Water layer are retained.
+
 ## [1.3.2] — 2026-11-17
 
 ### Fixed

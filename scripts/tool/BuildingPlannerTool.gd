@@ -40,12 +40,13 @@ var _wall_builder = null   # WallBuilder
 var _path_builder = null   # PathBuilder
 var _room_builder = null   # RoomBuilder
 var _roof_builder = null   # RoofBuilder
+var _water_fill = null   # WaterFill
 
 # ============================================================================
 # STATE
 # ============================================================================
 
-enum Mode { PATTERN_FILL = 1, WALL_BUILDER, PATH_BUILDER, ROOM_BUILDER, ROOF_BUILDER }
+enum Mode { PATTERN_FILL = 1, WALL_BUILDER, PATH_BUILDER, ROOM_BUILDER, ROOF_BUILDER, WATER_FILL }
 
 var _active_mode: int = Mode.PATTERN_FILL  # Default to first mode
 var is_enabled: bool = false
@@ -127,7 +128,7 @@ func _on_api_registered(api_id, _api):
 # Load and instantiate feature modules.
 # Called once when GuidesLinesApi becomes available.
 func _init_features():
-	for entry in [["PatternFill", "_pattern_fill"], ["WallBuilder", "_wall_builder"], ["PathBuilder", "_path_builder"], ["RoomBuilder", "_room_builder"], ["RoofBuilder", "_roof_builder"]]:
+	for entry in [["PatternFill", "_pattern_fill"], ["WallBuilder", "_wall_builder"], ["PathBuilder", "_path_builder"], ["RoomBuilder", "_room_builder"], ["RoofBuilder", "_roof_builder"], ["WaterFill", "_water_fill"]]:
 		var script = ResourceLoader.load(parent_mod.Global.Root + "scripts/features/" + entry[0] + ".gd", "GDScript", false)
 		if script:
 			set(entry[1], script.new(_gl_api, LOGGER, parent_mod))
@@ -478,6 +479,10 @@ func handle_canvas_click(world_pos: Vector2) -> bool:
 			if _ui:
 				_ui.sync_roof_settings(parent_mod.Global)
 			feature = _roof_builder
+		Mode.WATER_FILL:
+			if _ui:
+				_ui._wf_water_panel.sync_level_settings(parent_mod.Global)
+			feature = _water_fill
 	if not feature:
 		return false
 	feature.build_at(world_pos)

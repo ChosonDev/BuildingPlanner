@@ -26,6 +26,38 @@ static func record_action(parent_mod, logger, action) -> void:
 	elif logger:
 		logger.warn("BuildingPlanner: HistoryApi not available — action will not be undoable.")
 
+# Border visibility is shared by the level, separately from native water geometry.
+class WaterBorderRecord:
+	var _parent_mod
+	var _world
+	var _level
+	var _feature
+	var _mesh
+	var _before
+	var _after
+	func _init(parent_mod, feature, mesh, before, after):
+		_parent_mod = parent_mod
+		_world = parent_mod.Global.World
+		_level = _world.Level
+		_feature = weakref(feature)
+		_mesh = mesh
+		_before = before
+		_after = after
+	func _apply(value):
+		if not Utils.is_current_world(_parent_mod, _world, _level) or not is_instance_valid(_mesh): return
+		_mesh.DisableBorder(value)
+		var feature = _feature.get_ref()
+		if feature: feature.emit_signal("border_changed", _mesh, value)
+	func undo():
+		_apply(_before)
+	func redo():
+		_apply(_after)
+	func dropped(_direction):
+		_mesh = null
+		_parent_mod = null
+	func record_type():
+		return "BuildingPlanner.WaterBorder"
+
 # Single native objects share ownership, map guards and snapshot lifetime.
 # Kind-specific loading keeps native IDs, path tint and roof lighting semantics.
 class NativeObjectRecord:

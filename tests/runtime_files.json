@@ -58,6 +58,10 @@
       "args": []
     },
     {
+      "path": "scripts/features/WaterFill.gd",
+      "args": [null, null]
+    },
+    {
       "path": "scripts/features/WallBuilder.gd",
       "args": [
         null,
