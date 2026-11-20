@@ -15,6 +15,8 @@ extends Reference
 
 const CLASS_NAME = "RoomBuilder"
 const PatternFill = preload("PatternFill.gd")
+const SmartTileFill = preload("SmartTileFill.gd")
+const RoomFloorState = preload("RoomFloorState.gd")
 const WallBuilder = preload("WallBuilder.gd")
 const PathBuilder = preload("PathBuilder.gd")
 const BuildingPlannerHistory   = preload("../tool/BuildingPlannerHistory.gd")
@@ -37,11 +39,17 @@ var _supported_modes = []
 var _supports_preview = false
 var _supports_templates = false
 var room_template = null # Selected independent RoomTemplate, or live GuidesLines state.
+var _preview_geometry_key = []
+var _preview_geometry_cache = []
 const SUB_MODE_METHODS = ["place_shape_marker_plain", "place_shape_merge", "place_shape_conforming", "place_shape_wrapping", "apply_shape_difference"]
 const REQUIRED_API_METHODS = ["delete_marker", "is_ready", "begin_history_capture", "end_history_capture"]
 
 # Independent room settings use the same feature implementations as standalone tools.
 var _pattern_fill = null
+var _smart_tile_fill = null
+var _floor_state = null
+enum FillMode { PATTERN = 0, TILES = 1 }
+var active_fill_mode = FillMode.PATTERN
 var _wall_builder = null
 var _path_builder = null
 
@@ -91,6 +99,8 @@ func _init(gl_api, logger, parent_mod = null):
 	_supports_preview = gl_api != null and gl_api.has_method("set_shape_preview") and gl_api.has_method("clear_shape_preview")
 	_supports_templates = supported and gl_api.has_method("get_template_markers") and gl_api.has_method("apply_marker_geometry")
 	_pattern_fill = PatternFill.new(gl_api, logger, parent_mod)
+	_smart_tile_fill = SmartTileFill.new(gl_api, logger, parent_mod)
+	_floor_state = RoomFloorState.new(_smart_tile_fill)
 	_wall_builder = WallBuilder.new(gl_api, logger, parent_mod)
 	_path_builder = PathBuilder.new(gl_api, logger, parent_mod)
 
@@ -147,12 +157,23 @@ func get_preview_geometry(world_pos: Vector2, state: Dictionary) -> Array:
 	var template = state.get("active_marker_type") == "Template"
 	var args = [1] if template else _shape_args(state)
 	if not _can_build(world_pos, state, args): return []
-	if template: return _template_batch(world_pos)
 	var level = BuildingPlannerUtils.resolve_level(_parent_mod)
 	var tile_map = level.get("TileMap") if level else null
-	if tile_map == null: return []
-	var cell = tile_map.CellSize
-	if not cell is Vector2 or cell.x <= 0 or cell.y <= 0 or is_inf(cell.x) or is_inf(cell.y) or is_nan(cell.x) or is_nan(cell.y): return []
+	var cell = tile_map.CellSize if tile_map != null else null
+	if not template and (not cell is Vector2 or cell.x <= 0 or cell.y <= 0 or is_inf(cell.x) or is_inf(cell.y) or is_nan(cell.x) or is_nan(cell.y)): return []
+	var revision = _gl_api.get_geometry_revision() if template and _gl_api.has_method("get_geometry_revision") else -1
+	var key = [world_pos, cell, level.get_instance_id() if level is Object else level,
+		template, args[0], args[1] if not template else 0, args[2] if not template else 0,
+		shape_angle_offset, shape_scale_factor, room_template,
+		state.get("active_template_id"), state.get("active_template_index"),
+		state.get("template_rotation_offset"), state.get("template_scale"), revision]
+	# Old template APIs have no revision token: keep polling those sources fresh.
+	var cacheable = not template or room_template != null or revision != -1
+	if cacheable and key == _preview_geometry_key: return _preview_geometry_cache
+	_preview_geometry_key = key
+	if template:
+		_preview_geometry_cache = _template_batch(world_pos)
+		return _preview_geometry_cache
 	var points = []
 	for i in range(args[2]):
 		var angle = TAU * i / args[2] + deg2rad(args[1])
@@ -163,11 +184,15 @@ func get_preview_geometry(world_pos: Vector2, state: Dictionary) -> Array:
 	var area = BuildingPlannerUtils.signed_area(points)
 	if is_nan(area) or is_inf(area) or abs(area) <= 0.125: return []
 	# ponytail: preview the placement footprint in boolean modes; exact results need a read-only boolean preview API.
-	return [{"marker_type": "Shape", "polygon": points}]
+	_preview_geometry_cache = [{"marker_type": "Shape", "polygon": points}]
+	return _preview_geometry_cache
 
 ## Map-scoped associations must survive tool switches but never map changes.
 func on_map_changed() -> void:
 	_registry.clear()
+	_floor_state.clear()
+	_preview_geometry_key = []
+	_preview_geometry_cache = []
 
 # ============================================================================
 # BUILD ROOM
@@ -193,7 +218,8 @@ func build_room_at(coords: Vector2, state: Dictionary) -> bool:
 	if not _gl_api.begin_history_capture():
 		if LOGGER: LOGGER.error("RoomBuilder: GuidesLinesApi rejected begin_history_capture; room placement cancelled.")
 		return false
-	_operation = BuildingPlannerHistory.RoomBuilderRecord.new(_parent_mod, _registry)
+	_operation = BuildingPlannerHistory.RoomBuilderRecord.new(_parent_mod, _registry, _floor_state)
+	_floor_state.reset_contexts()
 	_difference_noop = false
 	var success = true
 	if template:
@@ -209,6 +235,7 @@ func build_room_at(coords: Vector2, state: Dictionary) -> bool:
 		_difference_noop = all_noop
 	else:
 		success = _build_room(coords, args, state.get("active_color", null))
+	if success: success = _floor_state.commit(_operation)
 	var marker_records = _gl_api.end_history_capture()
 	if success and (_difference_noop or active_sub_mode == SubMode.SINGLE):
 		marker_records = [] # Successful Single and non-overlapping Difference leave markers unchanged.
@@ -221,6 +248,7 @@ func build_room_at(coords: Vector2, state: Dictionary) -> bool:
 		BuildingPlannerHistory.record_action(_parent_mod, LOGGER, _operation)
 		if LOGGER: LOGGER.debug("RoomBuilder: compound history recorded.")
 	_operation = null
+	_floor_state.reset_contexts()
 	return success
 
 func _shape_args(state: Dictionary) -> Array:
@@ -254,6 +282,7 @@ func _can_build(coords: Vector2, state: Dictionary, args: Array) -> bool:
 		return false
 	if active_outline_mode != OutlineMode.WALL and active_outline_mode != OutlineMode.PATH:
 		return false
+	if active_fill_mode != FillMode.PATTERN and active_fill_mode != FillMode.TILES: return false
 	return not (is_nan(coords.x) or is_nan(coords.y) or is_inf(coords.x) or is_inf(coords.y)) and is_instance_valid(_gl_api) and _gl_api.has_method("is_ready") and _gl_api.is_ready()
 
 func _template_batch(coords: Vector2) -> Array:
@@ -361,7 +390,7 @@ func _build_room(coords, args, color, marker: Dictionary = {}) -> bool:
 				if not level in merged_levels:
 					merged_levels.append(level)
 	for id in absorbed:
-		_registry.cleanup(id, _parent_mod.Global.World, _parent_mod.Global)
+		_cleanup_room(id)
 	if active_sub_mode == SubMode.CONFORM or active_sub_mode == SubMode.WRAP:
 		var id = result.get("marker_id", -1)
 		var polygon = BuildingPlannerUtils.sanitize_polygon(result.get("marker_polygon", []))
@@ -385,7 +414,7 @@ func _build_room(coords, args, color, marker: Dictionary = {}) -> bool:
 			# Boolean cuts edit GuidesLines markers; only existing rooms own native objects.
 			if active_sub_mode != SubMode.MERGE and not _registry.has_entry(id):
 				continue
-			_registry.cleanup(id, _parent_mod.Global.World, _parent_mod.Global)
+			_cleanup_room(id)
 			# An empty outline is the valid result of a fully consumed marker.
 			var levels = merged_levels if active_sub_mode == SubMode.MERGE else levels_by_id[id]
 			var settings = {} if active_sub_mode == SubMode.MERGE else settings_by_id[id]
@@ -419,7 +448,10 @@ func _populate_marker_geometry(id, polygon, keep_marker = true, levels: Array = 
 		levels = [_parent_mod.Global.World.Level]
 	if settings.empty():
 		var outline = _wall_builder if active_outline_mode == OutlineMode.WALL else _path_builder
-		settings = {"outline_mode": active_outline_mode, "fill": _pattern_fill.get_settings(), "outline": outline.get_settings()}
+		settings = {"outline_mode": active_outline_mode, "fill_mode": active_fill_mode,
+			"fill": _smart_tile_fill.get_style() if active_fill_mode == FillMode.TILES else _pattern_fill.get_settings(), "outline": outline.get_settings()}
+	var tiles = settings.get("fill_mode", FillMode.PATTERN) == FillMode.TILES
+	var floor_id = id if keep_marker else _floor_state.allocate_id()
 	var shapes = []
 	var outlines = []
 	var contours = BuildingPlannerUtils.prepare_outlines(BuildingPlannerUtils.region_outline({"polygon": polygon, "source_polygons": [polygon]}), settings.outline, LOGGER)
@@ -429,7 +461,8 @@ func _populate_marker_geometry(id, polygon, keep_marker = true, levels: Array = 
 	outline_settings.active_reverse_direction = false
 	var success = true
 	for level in levels:
-		var fill = _pattern_fill._create_shape(polygon, level, settings.fill) if settings.fill.active_texture != null else null
+		if tiles and settings.fill.active_texture != null and not _floor_state.stage(floor_id, polygon, level, settings.fill): return false
+		var fill = _pattern_fill._create_shape(polygon, level, settings.fill) if not tiles and settings.fill.active_texture != null else null
 		if is_instance_valid(fill):
 			shapes.append(fill)
 		for contour in contours:
@@ -438,7 +471,7 @@ func _populate_marker_geometry(id, polygon, keep_marker = true, levels: Array = 
 				outlines.append(outline)
 			else:
 				success = false
-		if settings.fill.active_texture != null and not is_instance_valid(fill):
+		if not tiles and settings.fill.active_texture != null and not is_instance_valid(fill):
 			success = false
 	if keep_marker:
 		_registry.register(id, shapes, outlines, levels, settings)
@@ -446,3 +479,10 @@ func _populate_marker_geometry(id, polygon, keep_marker = true, levels: Array = 
 		_operation._loose.fills += shapes
 		_operation._loose.walls += outlines
 	return success
+
+func _cleanup_room(id):
+	_floor_state.remove(id)
+	_registry.cleanup(id, _parent_mod.Global.World, _parent_mod.Global)
+
+func get_fill_preview_settings() -> Dictionary:
+	return _smart_tile_fill.get_settings() if active_fill_mode == FillMode.TILES else _pattern_fill.get_settings()

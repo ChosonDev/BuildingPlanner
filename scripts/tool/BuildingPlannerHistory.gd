@@ -26,6 +26,60 @@ static func record_action(parent_mod, logger, action) -> void:
 	elif logger:
 		logger.warn("BuildingPlanner: HistoryApi not available — action will not be undoable.")
 
+# Shared contours and bounded cell snapshots; there is no individual floor node.
+# ponytail: history stores complete contours and affected cells per action;
+# room snapshots are sparse. Use deltas if large maps need smaller records.
+class SmartTileFillRecord:
+	var _parent_mod
+	var _world
+	var _level
+	var _start
+	var _end
+	var _coordinates
+	var _before
+	var _after
+	func _init(parent_mod, level, start, end, before, coordinates = null):
+		_parent_mod = parent_mod
+		_world = parent_mod.Global.World
+		_level = level
+		_start = start
+		_end = end
+		_coordinates = coordinates
+		_before = {"floor": before, "cells": _cells()}
+	func _cells():
+		var result = []
+		if _coordinates != null:
+			for cell in _coordinates:
+				result.append([int(cell.x), int(cell.y), _level.TileMap.get_cellv(cell), _level.TileMap.get_cell_color(int(cell.x), int(cell.y))])
+			return result
+		for y in range(int(_start.y), int(_end.y)):
+			for x in range(int(_start.x), int(_end.x)):
+				result.append([x, y, _level.TileMap.get_cell(x, y), _level.TileMap.get_cell_color(x, y)])
+		return result
+	func finish():
+		_after = {"floor": _level.FloorShapes.Save().duplicate(true), "cells": _cells()}
+	func _apply(snapshot):
+		if not Utils.is_current_world(_parent_mod, _world, _level): return
+		for cell in snapshot.cells:
+			_level.TileMap.set_cell(cell[0], cell[1], cell[2])
+			_level.TileMap.set_cell_color(cell[0], cell[1], cell[3])
+		for cell in snapshot.cells:
+			_level.TileMap.update_bitmask_area(Vector2(cell[0], cell[1]))
+		_level.FloorShapes.Restore(snapshot.floor.duplicate(true))
+	func undo():
+		_apply(_before)
+	func redo():
+		_apply(_after)
+	func dropped(_direction):
+		_before = null
+		_after = null
+		_parent_mod = null
+		_world = null
+		_level = null
+		_coordinates = null
+	func record_type():
+		return "BuildingPlanner.SmartTileFill"
+
 # Border visibility is shared by the level, separately from native water geometry.
 class WaterBorderRecord:
 	var _parent_mod
@@ -189,6 +243,10 @@ class RoofBuilderRecord:
 # Entries are serialized before cleanup; undo/redo resolve current registry nodes,
 # since a later boolean action may already have replaced the original instances.
 class RoomBuilderRecord:
+	var _floor_state = null
+	var _floor_before = {}
+	var _floor_after = {}
+	var _floor_records = []
 	var _parent_mod
 	var _registry
 	var _world
@@ -202,18 +260,24 @@ class RoomBuilderRecord:
 	var _pending_order = []
 	var _levels = []
 
-	func _init(parent_mod, registry):
+	func _init(parent_mod, registry, floor_state = null):
 		_parent_mod = parent_mod
 		_registry = registry
 		_world = parent_mod.Global.World
 		_level = _world.Level
 		_generation = registry.generation
+		if floor_state != null:
+			_floor_state = weakref(floor_state)
+			_floor_before = floor_state.levels.duplicate(true)
 
 	func remember(marker_id):
 		if not _before.has(marker_id):
 			_before[marker_id] = _save_entry(_registry.get_entry(marker_id))
 
 	func finish(records):
+		if _floor_state != null and _floor_state.get_ref(): _floor_after = _floor_state.get_ref().levels.duplicate(true)
+		for record in _floor_records:
+			if not record._level in _levels: _levels.append(record._level)
 		_marker_records = records
 		for id in _before:
 			_after[id] = _save_entry(_registry.get_entry(id))
@@ -242,6 +306,7 @@ class RoomBuilderRecord:
 						"color": node.modulate,
 						"path": is_path})
 		saved["settings"] = entry.get("settings", {}) # Takes ownership of the detached registry snapshot.
+		saved["levels"] = levels.duplicate()
 		return saved
 
 	func _clear_current():
@@ -275,8 +340,8 @@ class RoomBuilderRecord:
 		for id in entries:
 			var saved = entries[id]
 			var entry = _restore_entry(saved)
-			if not entry.fills.empty() or not entry.walls.empty():
-				var levels = []
+			if not entry.fills.empty() or not entry.walls.empty() or saved.get("settings", {}).get("fill_mode", 0) == 1:
+				var levels = saved.get("levels", []).duplicate() if saved.get("settings", {}).get("fill_mode", 0) == 1 else []
 				for key in ["fills", "walls"]:
 					for item in saved[key]:
 						if not item.level in levels:
@@ -300,6 +365,8 @@ class RoomBuilderRecord:
 		for i in range(_marker_records.size() - 1, -1, -1):
 			_marker_records[i].undo()
 		_restore(_before)
+		for i in range(_floor_records.size() - 1, -1, -1): _floor_records[i].undo()
+		if _floor_state != null and _floor_state.get_ref(): _floor_state.get_ref().levels = _floor_before.duplicate(true)
 
 	func redo():
 		if not _is_current():
@@ -310,6 +377,8 @@ class RoomBuilderRecord:
 		_restore(_after)
 		_loose = _restore_entry(_loose_data)
 		_apply_order()
+		for record in _floor_records: record.redo()
+		if _floor_state != null and _floor_state.get_ref(): _floor_state.get_ref().levels = _floor_after.duplicate(true)
 
 	func _is_current():
 		if _registry.generation != _generation or not Utils.is_current_world(_parent_mod, _world, _level):
@@ -320,9 +389,14 @@ class RoomBuilderRecord:
 		return true
 
 	func has_changes():
-		return not _marker_records.empty() or not _before.empty() or not _loose.fills.empty() or not _loose.walls.empty()
+		return not _floor_records.empty() or not _marker_records.empty() or not _before.empty() or not _loose.fills.empty() or not _loose.walls.empty()
 
 	func dropped(direction):
+		for record in _floor_records: record.dropped(direction)
+		_floor_records.clear()
+		_floor_before.clear()
+		_floor_after.clear()
+		_floor_state = null
 		for record in _marker_records:
 			if record.has_method("dropped"):
 				record.dropped(direction)

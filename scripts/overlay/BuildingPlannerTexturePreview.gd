@@ -17,6 +17,10 @@ var _pattern_style = {}
 var _cap_key = null
 var _cap_texture = null
 var _pattern_materials = {}
+var _tile_cells = []
+var _tile_cell_pool = []
+var _autotile_map = null
+var _tile_geometry_key = []
 var _path_gradient = Gradient.new()
 
 func _init():
@@ -41,6 +45,18 @@ func _init():
 
 func clear_preview() -> void:
 	hide()
+	# Retain the previous high-water mark until this renderer is destroyed.
+	for i in range(_tile_cells.size() - 1, -1, -1):
+		var cell = _tile_cells[i]
+		cell.hide()
+		cell.texture = null
+		cell.material = null
+		_tile_cell_pool.append(cell)
+	_tile_cells.clear()
+	_tile_geometry_key = []
+	if is_instance_valid(_autotile_map):
+		_autotile_map.clear()
+		_autotile_map.tile_set = null
 	for renderer in _contour_previews: renderer.clear_preview()
 	_polygon.hide()
 	_polygon.texture = null
@@ -62,13 +78,32 @@ func _resource(path: String):
 	return _resources[path]
 
 func sync_preview(preview: Dictionary, settings: Dictionary, path: bool, parent_mod = null) -> void:
+	var tile_key = []
+	var source = settings.get("smart_tilemap")
+	if preview.get("fill", false) and not settings.get("erase", false) and preview.get("reason", "") == "" and is_instance_valid(source):
+		tile_key = [preview.get("points", []), settings.get("active_texture"), source.get_instance_id(),
+			source.tile_set, source.cell_size, settings.get("smart_tile_id"), settings.get("smart_tile_revision", 0)]
+		if not _tile_cells.empty() and tile_key == _tile_geometry_key:
+			for cell in _tile_cells:
+				if cell.color != settings.active_color: cell.color = settings.active_color
+			show()
+			return
 	clear_preview()
 	var points = preview.get("points", [])
 	var texture = settings.get("active_texture")
 	if points.size() < 2 or not texture is Texture or texture.get_width() <= 0 or texture.get_height() <= 0 or preview.get("reason", "") != "":
 		return
 	if preview.fill:
-		_draw_pattern(points, settings, parent_mod)
+		if settings.get("erase", false):
+			_polygon.polygon = PoolVector2Array(points)
+			_polygon.color = Color(1.0, 0.2, 0.1, 0.6)
+			_polygon.show()
+		elif settings.has("smart_tile_id"):
+			_draw_smart_tiles(points, settings)
+			_tile_geometry_key = tile_key
+			if not _tile_geometry_key.empty(): _tile_geometry_key[0] = points.duplicate()
+		else:
+			_draw_pattern(points, settings, parent_mod)
 	else:
 		_draw_outline(points, preview.closed, settings, path, parent_mod)
 		var contours = preview.get("contours", [points])
@@ -84,6 +119,64 @@ func sync_preview(preview: Dictionary, settings: Dictionary, path: bool, parent_
 			contour_preview.points = contours[i]
 			_contour_previews[i - 1].sync_preview(contour_preview, settings, path, parent_mod)
 	show()
+
+func _draw_smart_tiles(points: Array, settings: Dictionary) -> void:
+	var source = settings.smart_tilemap
+	var id = settings.smart_tile_id
+	if not is_instance_valid(source) or id < 0: return
+	if not is_instance_valid(_autotile_map):
+		_autotile_map = TileMap.new()
+		add_child(_autotile_map)
+		_autotile_map.hide()
+	_autotile_map.tile_set = source.tile_set
+	_autotile_map.cell_size = source.cell_size
+	var bounds = Rect2(points[0], Vector2.ZERO)
+	for point in points: bounds = bounds.expand(point)
+	var start = source.world_to_map(bounds.position)
+	var end = Vector2(ceil(bounds.end.x / source.cell_size.x), ceil(bounds.end.y / source.cell_size.y))
+	# ponytail: per-cell clipping is O(cells * contour size); bound the preview
+	# to 4096 cells and use a viewport/mask renderer if larger previews are needed.
+	if (end.x - start.x) * (end.y - start.y) > 4096: return
+	var fragments = {}
+	var packed_points = PoolVector2Array(points)
+	for y in range(int(start.y) - 1, int(end.y) + 1):
+		for x in range(int(start.x) - 1, int(end.x) + 1):
+			var cell = Vector2(x, y)
+			_autotile_map.set_cellv(cell, source.get_cellv(cell))
+			if x < start.x or y < start.y or x >= end.x or y >= end.y: continue
+			var p = source.map_to_world(cell)
+			var size = source.cell_size
+			var rect = PoolVector2Array([p, p + Vector2(size.x, 0), p + size, p + Vector2(0, size.y)])
+			var clipped = Geometry.intersect_polygons_2d(packed_points, rect)
+			if not clipped.empty():
+				fragments[cell] = clipped
+				_autotile_map.set_cellv(cell, id)
+	_autotile_map.update_bitmask_region(start - Vector2.ONE, end + Vector2.ONE)
+	var tiles = source.tile_set
+	var mode = tiles.tile_get_tile_mode(id)
+	var region = tiles.tile_get_region(id)
+	var tile_size = tiles.autotile_get_size(id) if mode != TileSet.SINGLE_TILE else region.size
+	var material = tiles.tile_get_material(id)
+	var spacing = Vector2.ONE * tiles.autotile_get_spacing(id) if mode != TileSet.SINGLE_TILE else Vector2.ZERO
+	if tile_size == Vector2.ZERO: tile_size = settings.active_texture.get_size()
+	for cell in fragments:
+		var offset = region.position
+		if mode != TileSet.SINGLE_TILE:
+			offset += _autotile_map.get_cell_autotile_coord(int(cell.x), int(cell.y)) * (tile_size + spacing)
+		for fragment in fragments[cell]:
+			var polygon = _tile_cell_pool.pop_back() if not _tile_cell_pool.empty() else Polygon2D.new()
+			polygon.polygon = fragment
+			polygon.texture = settings.active_texture
+			polygon.color = settings.active_color
+			polygon.material = material
+			var uv = PoolVector2Array()
+			var origin = source.map_to_world(cell)
+			for point in fragment:
+				uv.append(offset + (point - origin) / source.cell_size * tile_size)
+			polygon.uv = uv
+			if polygon.get_parent() == null: add_child(polygon)
+			polygon.show()
+			_tile_cells.append(polygon)
 
 func _draw_pattern(points: Array, settings: Dictionary, parent_mod) -> void:
 	var texture = settings.active_texture

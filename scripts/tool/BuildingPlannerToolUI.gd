@@ -507,6 +507,56 @@ class FeaturePanel:
 				layer_option.select(i)
 				return
 
+class SmartTilePanel:
+	extends FeaturePanel
+	var allow_empty = false
+	var allow_erase = true
+
+	func build() -> VBoxContainer:
+		var sec = VBoxContainer.new()
+		sec.add_child(_label("Smart Tiles:"))
+		var note = _label("Hover previews up to 4096 cells.")
+		note.autowrap = true
+		sec.add_child(note)
+		_add_grid(sec)
+		color_picker = _add_color_picker(sec)
+		if allow_erase: _add_check(sec, "Erase native floor in region", "erase", false)
+		return sec
+
+	func try_build_grid_menu(gl) -> void:
+		if _populated or not gl or not gl.World: return
+		var level = gl.World.get("Level")
+		if not level: return
+		var tilemap = level.get("TileMap")
+		if not is_instance_valid(tilemap) or not tilemap.tile_set: return
+		var items = []
+		_index_to_path = []
+		var tools = gl.Editor.Tools if gl.Editor else {}
+		var host_tool = tools.get("FloorShapeTool")
+		var controls = host_tool.get("Controls") if is_instance_valid(host_tool) else null
+		var source = controls.get("SmartTileId") if controls is Dictionary else null
+		if allow_empty:
+			_index_to_path.append("")
+			items.append({"icon": null, "texture": null, "tooltip": "No fill", "modulate": Color.white})
+		for id in tilemap.tile_set.get_tiles_ids():
+			var texture = tilemap.tile_set.tile_get_texture(id)
+			if not texture: continue
+			_index_to_path.append(texture.resource_path)
+			var icon = source.get_item_icon(id) if source is ItemList and id < source.get_item_count() else texture
+			items.append({"icon": icon, "texture": texture, "tooltip": tilemap.tile_set.tile_get_name(id) if tilemap.tile_set.tile_get_name(id) != "" else texture.resource_path.get_file().get_basename(), "modulate": tilemap.tile_set.tile_get_modulate(id)})
+		if items.empty(): return
+		var selected = _index_to_path.find(_selection_path)
+		_restoring = selected >= 0 or _keep_color_on_populate
+		_keep_color_on_populate = false
+		_sg.populate(items, selected)
+		_restoring = false
+		_populated = true
+
+	func _on_texture_selected(index: int):
+		if index >= 0 and index < _sg._all_items.size():
+			_set_field("texture", _sg._all_items[index].get("texture", _sg._all_items[index].icon))
+			_apply_default_color(index)
+
 class PatternPanel:
 	extends FeaturePanel
 
@@ -992,6 +1042,10 @@ var _mode_selector = null
 # Pattern Fill section
 var _pf_section       = null
 var _pf_pattern_panel = null   # PatternPanel
+var _pf_tile_panel = null
+var _pf_fill_selector = null
+var _pf_pattern_container = null
+var _pf_tile_container = null
 
 # Wall Builder section
 var _wb_section    = null
@@ -1013,6 +1067,10 @@ var _rb_name_edit = null
 var _rb_renaming_template = null
 var _rb_sub_mode_selector     = null   # OptionButton
 var _rb_pattern_panel         = null   # PatternPanel
+var _rb_tile_panel = null
+var _rb_fill_selector = null
+var _rb_pattern_container = null
+var _rb_tile_container = null
 var _rb_outline_mode_selector = null   # OptionButton (Wall / Path)
 var _rb_wall_panel            = null   # WallPanel
 var _rb_wall_container        = null   # VBoxContainer — shown when outline mode = Wall
@@ -1045,9 +1103,13 @@ func build(panel):
 	# ---- Create panel instances ----
 	panel.rect_min_size.x += 50
 	_pf_pattern_panel = PatternPanel.new()
+	_pf_tile_panel = SmartTilePanel.new()
 	_wb_wall_panel    = WallPanel.new( _tool.parent_mod.get("Script"))
 	_pb_path_panel    = PathPanel.new( _tool.parent_mod.get("Script"))
 	_rb_pattern_panel = PatternPanel.new()
+	_rb_tile_panel = SmartTilePanel.new()
+	_rb_tile_panel.allow_empty = true
+	_rb_tile_panel.allow_erase = false
 	_rb_pattern_panel.allow_empty = true
 	_rb_wall_panel    = WallPanel.new( _tool.parent_mod.get("Script"))
 	_rb_path_panel    = PathPanel.new( _tool.parent_mod.get("Script"))
@@ -1056,6 +1118,8 @@ func build(panel):
 
 	bind_features()
 	_all_panels = [_pf_pattern_panel, _wb_wall_panel, _pb_path_panel, _rb_pattern_panel, _rb_wall_panel, _rb_path_panel, _rf_roof_panel, _wf_water_panel]
+	_all_panels.append(_pf_tile_panel)
+	_all_panels.append(_rb_tile_panel)
 	for section in _all_panels:
 		section._catalogs = _catalogs
 		section.LOGGER = LOGGER
@@ -1078,7 +1142,7 @@ func build(panel):
 
 	_mode_selector = OptionButton.new()
 	_mode_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_mode_selector.add_item("Pattern Fill",  Mode.PATTERN_FILL)
+	_mode_selector.add_item("Floor Fill",  Mode.PATTERN_FILL)
 	_mode_selector.add_item("Wall Builder",  Mode.WALL_BUILDER)
 	_mode_selector.add_item("Path Builder",  Mode.PATH_BUILDER)
 	_mode_selector.add_item("Room Builder",  Mode.ROOM_BUILDER)
@@ -1091,7 +1155,17 @@ func build(panel):
 	root.add_child(HSeparator.new())
 
 	# ---- Mode sections ----
-	_pf_section = _pf_pattern_panel.build()
+	_pf_section = VBoxContainer.new()
+	_pf_fill_selector = OptionButton.new()
+	_pf_fill_selector.add_item("Pattern")
+	_pf_fill_selector.add_item("Smart Tiles")
+	_pf_fill_selector.connect("item_selected", self, "_on_floor_fill_selected")
+	_pf_section.add_child(_pf_fill_selector)
+	_pf_pattern_container = _pf_pattern_panel.build()
+	_pf_tile_container = _pf_tile_panel.build()
+	_pf_section.add_child(_pf_pattern_container)
+	_pf_section.add_child(_pf_tile_container)
+	_pf_tile_container.hide()
 	root.add_child(_pf_section)
 
 	_wb_section = _wb_wall_panel.build()
@@ -1117,7 +1191,7 @@ func build(panel):
 	for section in _all_panels:
 		if not section._sg: continue
 		section._sg._editor = _tool.parent_mod.Global.get("Editor")
-		section.sample_category = "Patterns" if section is PatternPanel else ("Walls" if section is WallPanel else ("Paths" if section is PathPanel else "Roofs"))
+		section.sample_category = "Tiles" if section is SmartTilePanel else ("Patterns" if section is PatternPanel else ("Walls" if section is WallPanel else ("Paths" if section is PathPanel else "Roofs")))
 		if sample_icon:
 			section.sample_button.icon = sample_icon
 			section.sample_button.text = ""
@@ -1139,9 +1213,11 @@ func build(panel):
 ## Also called after late GuidesLines registration creates the feature instances.
 func bind_features() -> void:
 	_pf_pattern_panel.bind_feature(_tool._pattern_fill)
+	if _pf_tile_panel: _pf_tile_panel.bind_feature(_tool._smart_tile_fill)
 	_wb_wall_panel.bind_feature(_tool._wall_builder)
 	_pb_path_panel.bind_feature(_tool._path_builder)
 	_rb_pattern_panel.bind_feature(_tool._room_builder._pattern_fill if _tool._room_builder else null)
+	if _rb_tile_panel: _rb_tile_panel.bind_feature(_tool._room_builder._smart_tile_fill if _tool._room_builder else null)
 	_rb_wall_panel.bind_feature(_tool._room_builder._wall_builder if _tool._room_builder else null)
 	_rb_path_panel.bind_feature(_tool._room_builder._path_builder if _tool._room_builder else null)
 	_rf_roof_panel.bind_feature(_tool._roof_builder)
@@ -1150,6 +1226,8 @@ func bind_features() -> void:
 		_on_rb_sub_mode(_rb_sub_mode_selector.selected)
 	if _rb_outline_mode_selector and _tool._room_builder:
 		_tool._room_builder.active_outline_mode = _rb_outline_mode_selector.selected
+	if _rb_fill_selector and _tool._room_builder:
+		_tool._room_builder.active_fill_mode = _rb_fill_selector.selected
 	update_room_overrides()
 
 # ============================================================================
@@ -1189,7 +1267,16 @@ func _build_room_builder_section() -> VBoxContainer:
 	update_room_overrides()
 
 	sec.add_child(HSeparator.new())
-	sec.add_child(_rb_pattern_panel.build())
+	_rb_fill_selector = OptionButton.new()
+	_rb_fill_selector.add_item("Pattern")
+	_rb_fill_selector.add_item("Smart Tiles")
+	_rb_fill_selector.connect("item_selected", self, "_on_rb_fill_selected")
+	sec.add_child(_rb_fill_selector)
+	_rb_pattern_container = _rb_pattern_panel.build()
+	_rb_tile_container = _rb_tile_panel.build()
+	_rb_tile_container.hide()
+	sec.add_child(_rb_pattern_container)
+	sec.add_child(_rb_tile_container)
 
 	sec.add_child(HSeparator.new())
 
@@ -1271,7 +1358,7 @@ func rebuild_room_templates():
 func _on_room_template_add():
 	# Include defaults of hidden outline panels before taking the snapshot.
 	var gl = _tool.parent_mod.Global
-	for panel in [_rb_pattern_panel, _rb_wall_panel, _rb_path_panel]: panel.try_build_grid_menu(gl)
+	for panel in [_rb_pattern_panel, _rb_tile_panel, _rb_wall_panel, _rb_path_panel]: panel.try_build_grid_menu(gl)
 	if _tool.add_room_template(): rebuild_room_templates()
 	else: _rb_template_status.text = "Cannot save template: select a valid GuidesLines shape or template first."
 
@@ -1316,6 +1403,17 @@ func apply_room_template(template) -> bool:
 	var panels = [_rb_pattern_panel, _rb_wall_panel, _rb_path_panel]
 	var restored = []
 	var asset_script = _tool.parent_mod.get("Script")
+	var tile_style = template.tile_style.duplicate(true)
+	var tile_texture = null
+	if tile_style.texture != "":
+		var world = _tool.parent_mod.Global.World
+		var tilemap = world.Level.get("TileMap") if world and world.Level else null
+		if is_instance_valid(tilemap) and tilemap.tile_set:
+			for id in tilemap.tile_set.get_tiles_ids():
+				var texture = tilemap.tile_set.tile_get_texture(id)
+				if texture and texture.resource_path == tile_style.texture: tile_texture = texture
+		if tile_texture == null: return false
+	tile_style.texture = tile_texture
 	# Resolve every asset before touching settings, so missing packs cannot apply half a style.
 	for i in range(3):
 		var settings = template.panels[i].duplicate(true)
@@ -1338,6 +1436,10 @@ func apply_room_template(template) -> bool:
 	for i in range(3):
 		panels[i].try_build_grid_menu(_tool.parent_mod.Global)
 		panels[i].apply_sample(restored[i])
+	_rb_tile_panel.try_build_grid_menu(_tool.parent_mod.Global)
+	_rb_tile_panel.apply_sample(tile_style)
+	_rb_fill_selector.select(template.fill_mode)
+	_on_rb_fill_selected(template.fill_mode)
 	_rb_path_panel.update_camt_color_state(_tool.parent_mod.Global)
 	if _rb_path_panel.color_picker.disabled:
 		_rb_path_panel.color_picker.color = Color.white
@@ -1360,6 +1462,15 @@ func get_selected_mode() -> int:
 
 ## Native hit tests use the current mouse and respect transformed object geometry.
 func sample_at(panel, level, position: Vector2) -> bool:
+	if panel.sample_category == "Tiles":
+		var tilemap = level.get("TileMap")
+		if not is_instance_valid(tilemap) or not tilemap.tile_set or not tilemap.has_method("get_cell_color"): return false
+		var cell = tilemap.world_to_map(position)
+		var id = tilemap.get_cellv(cell)
+		if id < 0 or not id in tilemap.tile_set.get_tiles_ids(): return false
+		panel.try_build_grid_menu(_tool.parent_mod.Global)
+		panel.apply_sample({"texture": tilemap.tile_set.tile_get_texture(id), "color": tilemap.get_cell_color(int(cell.x), int(cell.y))})
+		return true
 	var containers = {"Patterns": "PatternShapes", "Walls": "Walls", "Paths": "Pathways", "Roofs": "Roofs"}
 	var container = level.get(containers[panel.sample_category])
 	if not is_instance_valid(container): return false
@@ -1436,14 +1547,20 @@ func try_build_grid_menus(mode: int) -> void:
 	var gl = _tool.parent_mod.Global
 	match mode:
 		Mode.PATTERN_FILL:
-			_pf_pattern_panel.try_build_grid_menu(gl)
+			if _tool.smart_tiles_enabled:
+				_pf_tile_panel.try_build_grid_menu(gl)
+			else:
+				_pf_pattern_panel.try_build_grid_menu(gl)
 		Mode.WALL_BUILDER:
 			_wb_wall_panel.try_build_grid_menu(gl)
 		Mode.PATH_BUILDER:
 			_pb_path_panel.try_build_grid_menu(gl)
 			_pb_path_panel.update_camt_color_state(gl)
 		Mode.ROOM_BUILDER:
-			_rb_pattern_panel.try_build_grid_menu(gl)
+			if _tool._room_builder and _tool._room_builder.active_fill_mode == 1:
+				_rb_tile_panel.try_build_grid_menu(gl)
+			else:
+				_rb_pattern_panel.try_build_grid_menu(gl)
 			if _rb_outline_mode_selector.selected == 0:
 				_rb_wall_panel.try_build_grid_menu(gl)
 			else:
@@ -1503,6 +1620,14 @@ func _show_section(mode: int):
 # CALLBACKS — MODE
 # ============================================================================
 
+func _on_floor_fill_selected(index):
+	_tool.cancel_sampling()
+	_tool._clear_previews()
+	_tool.smart_tiles_enabled = index == 1
+	_pf_pattern_container.visible = index == 0
+	_pf_tile_container.visible = index == 1
+	if _tool.is_enabled: try_build_grid_menus(Mode.PATTERN_FILL)
+
 func _on_mode_selected(index):
 	var mode = _mode_selector.get_item_id(index)
 	_tool._set_mode(mode)
@@ -1536,6 +1661,14 @@ func _on_layers_changed() -> void:
 func _on_rb_sub_mode(index: int):
 	if _tool._room_builder:
 		_tool._room_builder.active_sub_mode = index
+
+func _on_rb_fill_selected(index: int):
+	_tool.cancel_sampling()
+	_tool._clear_previews()
+	if _tool._room_builder: _tool._room_builder.active_fill_mode = index
+	_rb_pattern_container.visible = index == 0
+	_rb_tile_container.visible = index == 1
+	if _tool.is_enabled: try_build_grid_menus(Mode.ROOM_BUILDER)
 
 func _on_rb_outline_mode(index: int):
 	release_search_focus()

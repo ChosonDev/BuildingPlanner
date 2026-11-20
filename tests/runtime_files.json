@@ -15,6 +15,11 @@
   ],
   "load_only": {},
   "construct": [
+    {"path": "scripts/features/RoomFloorState.gd", "args": [null]},
+    {
+      "path": "scripts/features/SmartTileFill.gd",
+      "args": [null, null]
+    },
     {
       "path": "BuildingPlanner.gd",
       "args": []

@@ -75,10 +75,11 @@ func refresh_room_preview(room, position: Vector2, state: Dictionary) -> void:
 	if geometry.empty():
 		clear_preview()
 		return
-	var fill_settings = room._pattern_fill.get_settings()
+	var fill_settings = room.get_fill_preview_settings()
 	var path = room.active_outline_mode == room.OutlineMode.PATH
 	var outline_settings = (room._path_builder if path else room._wall_builder).get_settings()
-	var key = [geometry, fill_settings, outline_settings, path]
+	# Settings are flat snapshots. Compare their values, not Dictionary identities.
+	var key = [geometry, fill_settings.values(), outline_settings.values(), path]
 	if key == _room_preview_state: return
 	if not preview.empty() or not _context.empty(): clear_preview()
 	for j in range(geometry.size() * 2, _room_previews.size()):
@@ -211,6 +212,7 @@ func refresh_preview(delta: float, feature, fill: bool, path: bool) -> void:
 		preview.fill = fill
 		preview.sources = _prepared_sources
 		preview.color = settings.active_color
+		if settings.get("erase", false): preview.color = Color.red
 		if not settings.active_texture is Texture:
 			preview.reason = "Select a valid texture before building."
 	if not is_instance_valid(_texture_preview):

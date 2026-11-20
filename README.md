@@ -1,6 +1,6 @@
 # Building Planner
 
-**Version:** 1.3.3
+**Version:** 1.3.4
 **Author:** Choson  
 **Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.4.5+)
 
@@ -65,7 +65,29 @@ Older installed APIs retain click-to-build and show an update message for hover.
 User testing confirmed the textured previews and cache/render optimizations
 working in Dungeondraft.
 
-### Pattern Fill
+### Floor Fill
+Choose **Pattern** for the existing pattern settings, or **Smart Tiles
+(experimental)** for native floor tiles from the loaded map's TileSet.
+Smart Tiles unions the GuidesLines region into the level's shared floor contours
+and updates intersecting cells through the host's autotiling. Intersecting existing
+floor cells in the region's bounding rectangle may be repainted, following native
+`FloorTileMap.UpdateRect` behavior. Undo/redo includes those cells and their colors.
+
+Smart Tiles supports levels without automatic building walls; manually built
+walls are allowed. The panel provides native material thumbnails, a color picker,
+sample picking (tile and cell color), and an **Erase native floor in region**
+toggle. Tint is saved per cell without changing shared tileset or native brush
+defaults. Erase shows a red region preview and has its own undoable placement.
+Native floor uses its fixed Floor layer, without pattern rotation or user layers. Hover previews
+use a temporary TileMap to choose autotiles and clip them to the marker region
+(up to 4096 cells); contacts with existing shared floor still require host checks.
+Room Builder has an independent Pattern / Smart Tiles selector, including **No
+fill**. Arbitrary edges, holes, neighboring tile sets, save/reopen and undo/redo
+require Dungeondraft validation; bevels and skirting
+depend on the tile set and host behavior. See the
+[implementation notes and runtime checklist](tests/SMART_TILE_FLOOR.md).
+
+#### Pattern
 Click anywhere inside a Shape marker to fill its interior with the selected terrain pattern.
 
 Configurable settings in the sidebar:
@@ -206,9 +228,25 @@ backups. Select a saved style to restore its settings; its geometry remains
 independent of later GuidesLines edits or deleted source templates. Required asset
 packs must still be installed. Missing textures leave the current settings intact.
 
-One-click room creation — places a pattern fill **and** a closed outline simultaneously,
+One-click room creation — places a Pattern or Smart Tiles floor **and** a closed outline simultaneously,
 using the current GuidesLines Shape parameters (radius, angle, sides), or the
 selected template/group when the GuidesLines **Template** tab is active.
+
+Smart Tiles supports Single, Merge, Conforming, Wrapping and Difference with Wall
+or Path outlines. A room action includes marker edits, outlines, shared floor
+contours, tile IDs and cell colors in one undo/redo step. Removing or changing a
+room restores the underlying native floor and recomposes surviving room floors;
+Conforming/Difference keep affected rooms' saved material styles. Merge uses the
+current floor style. Room templates save the floor kind, tile texture path and
+color; older templates default to Pattern.
+
+Floor ownership is scoped to the current map session, like room object
+associations. Untracked native floor geometry/cell edits while tile rooms are
+owned are preserved when their changed contours/cells are disjoint from owned
+rooms. Changes touching owned room contours or cells cancel the conflicting
+update instead of overwriting them.
+Reopening the map starts a new ownership session; existing floor remains native
+map content. Automatic building walls are still excluded from Smart Tiles.
 
 For templates, select the desired entry in GuidesLines and switch to BuildingPlanner
 Room mode. Its exact saved geometry and current rotation/scale are used. Room's
@@ -301,7 +339,7 @@ clipped polygons. Acts as a no-op when no existing markers overlap the click pos
 Optional: **Lievven.Snappy_Mod** — detected automatically; no configuration needed.  
 Optional: **[ColourAndModifyThings](https://github.com/Uchideshi/ColourAndModifyThings)** — enables path color picker in Path Builder and Room Builder (color persists across map reloads).
 
-BuildingPlanner 1.3.3 requires GuidesLines 2.4.5 or later, including its template,
+BuildingPlanner 1.3.4 requires GuidesLines 2.4.5 or later, including its template,
 geometry and history-capture APIs. Dungeondraft's manifest dependency list records
 mod IDs only; install the required GuidesLines version separately. Missing API
 capabilities disable the affected preview and placement before changing the map.

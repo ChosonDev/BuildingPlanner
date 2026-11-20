@@ -36,6 +36,8 @@ var cached_snappy_mod = null   # Lievven.Snappy_Mod reference (or null)
 # ============================================================================
 
 var _pattern_fill = null   # PatternFill
+var _smart_tile_fill = null
+var smart_tiles_enabled = false
 var _wall_builder = null   # WallBuilder
 var _path_builder = null   # PathBuilder
 var _room_builder = null   # RoomBuilder
@@ -128,6 +130,8 @@ func _on_api_registered(api_id, _api):
 # Load and instantiate feature modules.
 # Called once when GuidesLinesApi becomes available.
 func _init_features():
+	var floor_script = ResourceLoader.load(parent_mod.Global.Root + "scripts/features/SmartTileFill.gd", "GDScript", false)
+	if floor_script: _smart_tile_fill = floor_script.new(_gl_api, LOGGER, parent_mod)
 	for entry in [["PatternFill", "_pattern_fill"], ["WallBuilder", "_wall_builder"], ["PathBuilder", "_path_builder"], ["RoomBuilder", "_room_builder"], ["RoofBuilder", "_roof_builder"], ["WaterFill", "_water_fill"]]:
 		var script = ResourceLoader.load(parent_mod.Global.Root + "scripts/features/" + entry[0] + ".gd", "GDScript", false)
 		if script:
@@ -203,7 +207,8 @@ func Update(_delta):
 	elif is_instance_valid(_overlay):
 		var feature = null
 		match _active_mode:
-			Mode.PATTERN_FILL: feature = _pattern_fill
+			Mode.PATTERN_FILL:
+				feature = _smart_tile_fill if smart_tiles_enabled else _pattern_fill
 			Mode.WALL_BUILDER: feature = _wall_builder
 			Mode.PATH_BUILDER: feature = _path_builder
 		_overlay.refresh_preview(_delta, feature, _active_mode == Mode.PATTERN_FILL, _active_mode == Mode.PATH_BUILDER)
@@ -327,6 +332,9 @@ func add_room_template() -> bool:
 	template.name = "Room template %d" % (room_templates.size() + 1)
 	template.sub_mode = _room_builder.active_sub_mode
 	template.outline_mode = _room_builder.active_outline_mode
+	template.fill_mode = _room_builder.active_fill_mode
+	var tile_style = _room_builder._smart_tile_fill.get_style()
+	template.tile_style = {"texture": tile_style.active_texture.resource_path if tile_style.active_texture is Texture else "", "color": tile_style.active_color}
 	template.angle = _room_builder.shape_angle_offset
 	template.scale = _room_builder.shape_scale_factor
 	for key in ["active_shape_radius", "active_shape_angle", "active_shape_sides", "active_color"]:
@@ -464,7 +472,7 @@ func handle_canvas_click(world_pos: Vector2) -> bool:
 	var feature = null
 	match _active_mode:
 		Mode.PATTERN_FILL:
-			feature = _pattern_fill
+			feature = _smart_tile_fill if smart_tiles_enabled else _pattern_fill
 		Mode.WALL_BUILDER:
 			feature = _wall_builder
 		Mode.PATH_BUILDER:

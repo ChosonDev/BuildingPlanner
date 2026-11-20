@@ -10,6 +10,8 @@ const PANEL_FIELDS = [
 var name = "Room template"
 var sub_mode = 0
 var outline_mode = 0
+var fill_mode = 0
+var tile_style = {"texture": "", "color": Color.white}
 var angle = 0.0
 var scale = 1.0
 var state = {}
@@ -18,6 +20,7 @@ var panels = []
 
 func save() -> Dictionary:
 	return {"name": name, "sub_mode": sub_mode, "outline_mode": outline_mode,
+		"fill_mode": fill_mode, "tile_style": encode(tile_style),
 		"angle": angle, "scale": scale, "state": encode(state),
 		"geometry": encode(geometry), "panels": encode(panels)}
 
@@ -72,6 +75,9 @@ func load_data(data, defaults: Array) -> bool:
 	if not data.get("name") is String or data.name.strip_edges().empty(): return false
 	if not number(data.get("sub_mode")) or not data.sub_mode in [0, 1, 2, 3, 4]: return false
 	if not number(data.get("outline_mode")) or not data.outline_mode in [0, 1]: return false
+	if not data.get("fill_mode", 0) in [0, 1] or data.get("fill_mode", 0) is bool: return false
+	var tile_settings = decode(data.get("tile_style", {"texture": "", "color": {"$color": "ffffffff"}}))
+	if not tile_settings is Dictionary or tile_settings.size() != 2 or not tile_settings.get("texture") is String or not tile_settings.get("color") is Color: return false
 	if not number(data.get("angle")) or not number(data.get("scale")) or data.scale < 0.1: return false
 	var source = decode(data.get("state"))
 	if not source is Dictionary or not number(source.get("active_shape_radius")) or source.active_shape_radius <= 0: return false
@@ -120,6 +126,8 @@ func load_data(data, defaults: Array) -> bool:
 	name = data.name.strip_edges()
 	sub_mode = int(data.sub_mode)
 	outline_mode = int(data.outline_mode)
+	fill_mode = int(data.get("fill_mode", 0))
+	tile_style = tile_settings
 	angle = data.angle
 	scale = data.scale
 	state = source

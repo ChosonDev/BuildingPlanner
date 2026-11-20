@@ -3,6 +3,39 @@
 All notable changes to BuildingPlanner will be documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.3.4] — 2026-11-20
+
+### Added
+- Floor Fill selector with the existing Pattern mode and an experimental native
+  Smart Tiles mode, including shared-contour and cell/color undo snapshots.
+  Levels with automatic building walls remain excluded.
+- Smart Tile color, native thumbnail catalog, sample picker and standalone erase
+  mode with a red erase preview. Per-cell tint leaves the shared tileset unchanged.
+- Independent Pattern / Smart Tiles room floors in every Room Builder sub-mode,
+  including Wall/Path outlines, multi-level rebuilding and template/group input.
+- Compound room floor history and session-owned floor contributions preserve
+  underlying native floor and surviving rooms on boolean rebuilds. Conflicting
+  external native floor edits cancel placement instead of losing map content.
+- Room templates save floor kind, tile material path and color, with Pattern as
+  the backward-compatible default and atomic rejection of missing tile assets.
+- Disjoint external native floor contours and unowned cell edits are incorporated
+  into room baselines and survive subsequent room placement and undo/redo.
+
+### Fixed
+- Smart Tile/room previews cache catalog IDs and source geometry, reuse clipped
+  cell nodes, and update tint without rerunning autotiling. TileSet/history
+  invalidation keeps cached previews current.
+- Room floor history stores sparse owned cells instead of the rectangle between
+  distant rooms; transaction preflight reuses snapshots and avoids serializing
+  styles for equality. Diagnostic file tracing is disabled by default.
+- Smart Tiles obtains the no-wall icon from the native wall menu's theme.
+  The mod's injected Global has no Theme entry; calling get_icon on that missing
+  value could terminate the release host before native floor drawing started.
+  Added flushed placement checkpoints in user://buildingplanner-smart-tiles.log.
+- Smart Tiles now uses engine cell-color method names and the native DrawPolygon
+  entry point, avoiding GDScript dispatch of overloaded C# UpdateRect methods.
+- Added Smart Tiles hover rendering with native autotile selection and clipped
+  atlas UVs; the preview never edits map floor or native brush settings.
 ---
 
 ## [1.3.3] — 2026-11-17
