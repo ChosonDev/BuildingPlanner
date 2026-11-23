@@ -3,6 +3,17 @@
 All notable changes to BuildingPlanner will be documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.3.5] — 2026-11-23
+
+### Fixed
+- Route canvas left-clicks and Room Builder scroll-wheel input through
+  `ModBaseTool._ContentInput` (`on_content_input`) instead of
+  `BuildingPlannerOverlay._input`. Third-party `PopupMenu`, `PopupPanel` and
+  overlay controls now receive clicks before Building Planner handles the canvas,
+  while keeping `_input` exclusively for active eyedropper sampling.
+
+---
+
 ## [1.3.4] — 2026-11-20
 
 ### Added

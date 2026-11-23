@@ -335,31 +335,47 @@ func _ready() -> void:
 func _input(event: InputEvent) -> void:
 	if not tool or not tool.is_enabled:
 		return
+	if tool.get("_sampling_panel") == null:
+		return
 
 	# _input precedes GUI dispatch: leave modal input to the host window.
 	var editor = tool.parent_mod.Global.Editor
 	for window in editor.Windows.values():
 		if is_instance_valid(window) and window.visible:
-			if tool.get("_sampling_panel") != null: tool.cancel_sampling()
+			tool.cancel_sampling()
 			return
 	if get_viewport().gui_has_modal_stack():
-		if tool.get("_sampling_panel") != null: tool.cancel_sampling()
+		tool.cancel_sampling()
 		return
 
-	if tool.get("_sampling_panel") != null:
-		if event is InputEventMouseButton and event.pressed:
-			var button = tool._sampling_panel.sample_button
-			# Let Button's release signal toggle the active picker exactly once.
-			if event.button_index == BUTTON_LEFT and is_instance_valid(button) and button.is_visible_in_tree() and button.get_global_rect().has_point(event.position): return
-			if event.button_index == BUTTON_LEFT and tool.is_mouse_on_canvas():
-				tool.handle_canvas_click(tool.cached_worldui.MousePosition)
-				get_tree().set_input_as_handled()
-			else:
-				tool.cancel_sampling()
-				if tool.is_mouse_on_canvas(): get_tree().set_input_as_handled()
-		elif (event is InputEventKey or event is InputEventJoypadButton) and event.pressed:
-			tool.cancel_sampling()
+	if event is InputEventMouseButton and event.pressed:
+		var button = tool._sampling_panel.sample_button
+		# Let Button's release signal toggle the active picker exactly once.
+		if event.button_index == BUTTON_LEFT and is_instance_valid(button) and button.is_visible_in_tree() and button.get_global_rect().has_point(event.position): return
+		if event.button_index == BUTTON_LEFT and tool.is_mouse_on_canvas():
+			tool.handle_canvas_click(tool.cached_worldui.MousePosition)
 			get_tree().set_input_as_handled()
+		else:
+			tool.cancel_sampling()
+			if tool.is_mouse_on_canvas(): get_tree().set_input_as_handled()
+	elif (event is InputEventKey or event is InputEventJoypadButton) and event.pressed:
+		tool.cancel_sampling()
+		get_tree().set_input_as_handled()
+
+# Canvas mouse input forwarded from ModBaseTool._ContentInput (Content.gui_input).
+# Running in the GUI dispatch phase ensures PopupMenus and overlay Controls above
+# the canvas consume clicks before BuildingPlanner handles them.
+func handle_content_input(event: InputEvent) -> void:
+	if not tool or not tool.is_enabled:
+		return
+	if tool.get("_sampling_panel") != null:
+		return
+
+	var editor = tool.parent_mod.Global.Editor
+	for window in editor.Windows.values():
+		if is_instance_valid(window) and window.visible:
+			return
+	if get_viewport() and get_viewport().gui_has_modal_stack():
 		return
 
 	if not (event is InputEventMouseButton):

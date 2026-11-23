@@ -499,12 +499,17 @@ class OverlayTool:
 	var _active_mode = Mode.ROOM_BUILDER
 	var is_enabled = true
 	var parent_mod = {"Global": {"Editor": {"Windows": {}}}}
+	var cached_worldui = {"MousePosition": Vector2(40, 50)}
 	var on_canvas = false
 	var scrolls = []
+	var clicks = []
 	func is_mouse_on_canvas():
 		return on_canvas
 	func handle_room_scroll(direction, scale):
 		scrolls.append([direction, scale])
+	func handle_canvas_click(pos):
+		clicks.append(pos)
+		return true
 
 
 func test_room_wheel_input_ignores_sidebar_and_keeps_canvas_rotation_and_scale():
@@ -516,18 +521,27 @@ func test_room_wheel_input_ignores_sidebar_and_keeps_canvas_rotation_and_scale()
 	event.pressed = true
 	for button in [BUTTON_WHEEL_UP, BUTTON_WHEEL_DOWN]:
 		event.button_index = button
-		overlay._input(event)
+		overlay.handle_content_input(event)
 	assert_true(tool.scrolls.empty(), "Sidebar wheel reaches Control instead of changing room overrides")
 	tool.on_canvas = true
 	event.button_index = BUTTON_WHEEL_UP
 	overlay._input(event)
+	assert_true(tool.scrolls.empty(), "Wheel must not bypass GUI dispatch in _input")
+	overlay.handle_content_input(event)
 	event.alt = true
 	event.button_index = BUTTON_WHEEL_DOWN
-	overlay._input(event)
+	overlay.handle_content_input(event)
 	assert_eq_deep(tool.scrolls, [[1, false], [-1, true]])
 	event.control = true
-	overlay._input(event)
+	overlay.handle_content_input(event)
 	assert_eq(tool.scrolls.size(), 2, "Ctrl wheel remains reserved for camera zoom")
+	var click = InputEventMouseButton.new()
+	click.button_index = BUTTON_LEFT
+	click.pressed = true
+	overlay._input(click)
+	assert_true(tool.clicks.empty(), "Left click must not bypass GUI dispatch in _input")
+	overlay.handle_content_input(click)
+	assert_eq_deep(tool.clicks, [Vector2(40, 50)])
 	overlay.tool = null
 
 
