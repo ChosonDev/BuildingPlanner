@@ -87,7 +87,7 @@ func test_shared_catalog_survives_panel_release_and_invalidates_with_ui_map_rele
 	var ui = UI.new(tool, null)
 	ui.build(autofree(VBoxContainer.new()))
 	ui.try_build_grid_menus(ui.Mode.PATH_BUILDER)
-	ui._rb_outline_mode_selector.selected = 1
+	ui._on_rb_outline_add(1)
 	ui.try_build_grid_menus(ui.Mode.ROOM_BUILDER)
 	assert_eq(source.get_script().get_meta("load_count"), 1, "Both Path panels share one unfiltered native catalog")
 	assert_eq(ui._catalogs.Paths.items.size(), 2)
@@ -166,7 +166,7 @@ func test_panel_signals_bind_all_settings_to_independent_room_and_standalone_fea
 		assert_eq(tool._active_mode, ui._mode_selector.get_item_id(index))
 	ui._rb_sub_mode_selector.emit_signal("item_selected", 4)
 	assert_eq(tool._room_builder.active_sub_mode, 4)
-	ui._rb_outline_mode_selector.emit_signal("item_selected", 1)
+	ui._rb_outline_add_path.emit_signal("pressed")
 	assert_eq(tool._room_builder.active_outline_mode, 1)
 	assert_true(ui._rb_path_container.visible)
 	assert_false(ui._rb_wall_container.visible)

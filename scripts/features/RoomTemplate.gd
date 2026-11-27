@@ -17,12 +17,16 @@ var scale = 1.0
 var state = {}
 var geometry = []
 var panels = []
+var outlines = []
 
 func save() -> Dictionary:
-	return {"name": name, "sub_mode": sub_mode, "outline_mode": outline_mode,
+	var data = {"name": name, "sub_mode": sub_mode, "outline_mode": outline_mode,
 		"fill_mode": fill_mode, "tile_style": encode(tile_style),
 		"angle": angle, "scale": scale, "state": encode(state),
 		"geometry": encode(geometry), "panels": encode(panels)}
+	if not outlines.empty():
+		data["outlines"] = encode(outlines)
+	return data
 
 static func number(value) -> bool:
 	return (value is int or value is float) and not is_nan(value) and not is_inf(value)
@@ -70,6 +74,25 @@ static func decode(value):
 		return result
 	return value
 
+static func _validate_panel_style(style, panel_index: int, default_style: Dictionary) -> bool:
+	if not style is Dictionary or style.size() != PANEL_FIELDS[panel_index].size(): return false
+	for field in PANEL_FIELDS[panel_index]:
+		var value = style.get(field)
+		if field == "texture":
+			if not value is String: return false
+		elif not default_style.has(field): return false
+		elif default_style[field] is Color:
+			if not value is Color: return false
+		elif default_style[field] is bool:
+			if not value is bool: return false
+		elif not number(value): return false
+		elif default_style[field] is int:
+			if value != int(value): return false
+			style[field] = int(value)
+	if panel_index == 1 and (style.joint < 0 or style.joint > 2): return false
+	if panel_index == 2 and (style.width <= 0 or style.smoothness < 0 or style.smoothness > 1 or not style.sorting in [0, 1]): return false
+	return true
+
 func load_data(data, defaults: Array) -> bool:
 	if not data is Dictionary or not valid_json(data): return false
 	if not data.get("name") is String or data.name.strip_edges().empty(): return false
@@ -107,22 +130,26 @@ func load_data(data, defaults: Array) -> bool:
 	var styles = decode(data.get("panels"))
 	if not styles is Array or styles.size() != 3: return false
 	for i in range(3):
-		if not styles[i] is Dictionary or styles[i].size() != PANEL_FIELDS[i].size(): return false
-		for field in PANEL_FIELDS[i]:
-			var value = styles[i].get(field)
-			if field == "texture":
-				if not value is String: return false
-			elif not defaults[i].has(field): return false
-			elif defaults[i][field] is Color:
-				if not value is Color: return false
-			elif defaults[i][field] is bool:
-				if not value is bool: return false
-			elif not number(value): return false
-			elif defaults[i][field] is int:
-				if value != int(value): return false
-				styles[i][field] = int(value)
-	if styles[1].joint < 0 or styles[1].joint > 2: return false
-	if styles[2].width <= 0 or styles[2].smoothness < 0 or styles[2].smoothness > 1 or not styles[2].sorting in [0, 1]: return false
+		if not _validate_panel_style(styles[i], i, defaults[i]): return false
+	var loaded_outlines = []
+	if data.has("outlines"):
+		var raw_outlines = decode(data.get("outlines"))
+		if not raw_outlines is Array or raw_outlines.empty(): return false
+		for item in raw_outlines:
+			if not item is Dictionary or item.size() != 3: return false
+			if not item.get("name") is String or item.name.strip_edges().empty(): return false
+			var mode = item.get("mode")
+			if mode is bool or not number(mode) or not mode in [0, 1]: return false
+			var panel_index = 1 if int(mode) == 0 else 2
+			if not _validate_panel_style(item.get("settings"), panel_index, defaults[panel_index]): return false
+			loaded_outlines.append({"name": item.name.strip_edges(), "mode": int(mode), "settings": item.settings})
+	else:
+		var legacy_mode = int(data.outline_mode)
+		loaded_outlines.append({
+			"name": "Wall Default" if legacy_mode == 0 else "Path 1",
+			"mode": legacy_mode,
+			"settings": styles[1 if legacy_mode == 0 else 2].duplicate(true),
+		})
 	name = data.name.strip_edges()
 	sub_mode = int(data.sub_mode)
 	outline_mode = int(data.outline_mode)
@@ -134,6 +161,7 @@ func load_data(data, defaults: Array) -> bool:
 	state.active_shape_sides = int(state.active_shape_sides)
 	geometry = batch
 	panels = styles
+	outlines = loaded_outlines
 	return true
 
 func transformed_geometry(coords: Vector2, rotation: float, factor: float) -> Array:

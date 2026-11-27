@@ -54,7 +54,156 @@ var _wall_builder = null
 var _path_builder = null
 
 enum OutlineMode { WALL = 0, PATH = 1 }
-var active_outline_mode: int = OutlineMode.WALL
+var active_outline_mode: int = OutlineMode.WALL setget _set_active_outline_mode, _get_active_outline_mode
+var outlines: Array = []
+var active_outline_index: int = 0
+
+func _set_active_outline_mode(value: int) -> void:
+	active_outline_mode = value
+	if outlines.size() == 1 and value in [OutlineMode.WALL, OutlineMode.PATH]:
+		var entry = outlines[0]
+		if entry.mode != value:
+			entry.mode = value
+			entry.settings = _builder_for_mode(value).get_settings()
+
+func _get_active_outline_mode() -> int:
+	if active_outline_index >= 0 and active_outline_index < outlines.size():
+		return outlines[active_outline_index].mode
+	return active_outline_mode
+
+func _builder_for_mode(mode: int):
+	return _wall_builder if mode == OutlineMode.WALL else _path_builder
+
+func _apply_settings_to_builder(mode: int, settings: Dictionary) -> void:
+	var builder = _builder_for_mode(mode)
+	if not builder: return
+	for key in settings:
+		builder.set(key, settings[key])
+
+func default_outline_settings(mode: int) -> Dictionary:
+	var builder = _builder_for_mode(mode)
+	if mode == OutlineMode.WALL:
+		return {
+			"active_texture": builder.active_texture if builder else null,
+			"active_color": builder.active_color if builder else Color.white,
+			"active_shadow": true,
+			"active_joint": 1,
+			"active_offset": 0.0,
+			"active_reverse_direction": false,
+		}
+	return {
+		"active_texture": builder.active_texture if builder else null,
+		"active_color": Color.white,
+		"active_width": 1.0,
+		"active_offset": 0.0,
+		"active_reverse_direction": false,
+		"active_smoothness": 0.0,
+		"active_layer": BuildingPlannerUtils.DEFAULT_LAYER,
+		"active_sorting": 0,
+		"active_fade_in": false,
+		"active_fade_out": false,
+		"active_grow": false,
+		"active_shrink": false,
+		"active_block_light": false,
+	}
+
+func next_outline_name(mode: int) -> String:
+	var prefix = "Wall" if mode == OutlineMode.WALL else "Path"
+	var used = {}
+	for entry in outlines:
+		used[entry.name] = true
+	var n = 1
+	while used.has("%s %d" % [prefix, n]):
+		n += 1
+	return "%s %d" % [prefix, n]
+
+func sync_active_outline_from_builder() -> void:
+	if active_outline_index < 0 or active_outline_index >= outlines.size():
+		return
+	var entry = outlines[active_outline_index]
+	var builder = _builder_for_mode(entry.mode)
+	if builder:
+		entry.settings = builder.get_settings()
+
+func get_active_outline() -> Dictionary:
+	sync_active_outline_from_builder()
+	if active_outline_index >= 0 and active_outline_index < outlines.size():
+		return outlines[active_outline_index]
+	return {}
+
+func get_outline_entries() -> Array:
+	sync_active_outline_from_builder()
+	var result = []
+	for entry in outlines:
+		result.append({
+			"name": entry.name,
+			"mode": entry.mode,
+			"settings": entry.settings.duplicate(),
+		})
+	return result
+
+func add_outline(mode: int, custom_name: String = "", settings: Dictionary = {}) -> int:
+	if not mode in [OutlineMode.WALL, OutlineMode.PATH]:
+		return -1
+	sync_active_outline_from_builder()
+	var name = custom_name.strip_edges() if not custom_name.strip_edges().empty() else next_outline_name(mode)
+	var entry_settings = settings.duplicate() if not settings.empty() else default_outline_settings(mode)
+	outlines.append({"name": name, "mode": mode, "settings": entry_settings})
+	active_outline_index = outlines.size() - 1
+	active_outline_mode = mode
+	_apply_settings_to_builder(mode, entry_settings)
+	return active_outline_index
+
+func select_outline(index: int) -> bool:
+	if index < 0 or index >= outlines.size():
+		return false
+	if index == active_outline_index:
+		return true
+	sync_active_outline_from_builder()
+	active_outline_index = index
+	var entry = outlines[active_outline_index]
+	active_outline_mode = entry.mode
+	_apply_settings_to_builder(entry.mode, entry.settings)
+	return true
+
+func remove_outline(index: int) -> bool:
+	if outlines.size() <= 1 or index < 0 or index >= outlines.size():
+		return false
+	sync_active_outline_from_builder()
+	outlines.remove(index)
+	if active_outline_index >= outlines.size():
+		active_outline_index = outlines.size() - 1
+	elif index < active_outline_index:
+		active_outline_index -= 1
+	var entry = outlines[active_outline_index]
+	active_outline_mode = entry.mode
+	_apply_settings_to_builder(entry.mode, entry.settings)
+	return true
+
+func rename_outline(index: int, new_name: String) -> bool:
+	var trimmed = new_name.strip_edges()
+	if trimmed.empty() or index < 0 or index >= outlines.size():
+		return false
+	outlines[index].name = trimmed
+	return true
+
+func set_outlines(entries: Array, selected_index: int = 0) -> bool:
+	if entries.empty():
+		return false
+	var next = []
+	for entry in entries:
+		if not entry is Dictionary or not entry.get("mode") in [OutlineMode.WALL, OutlineMode.PATH] or not entry.get("settings") is Dictionary:
+			return false
+		var name = str(entry.get("name", "")).strip_edges()
+		if name.empty():
+			name = "Wall Default" if entry.mode == OutlineMode.WALL else "Path 1"
+		next.append({"name": name, "mode": int(entry.mode), "settings": entry.settings.duplicate()})
+	outlines = next
+	active_outline_index = int(clamp(selected_index, 0, outlines.size() - 1))
+	var current = outlines[active_outline_index]
+	active_outline_mode = current.mode
+	_apply_settings_to_builder(current.mode, current.settings)
+	return true
 
 # ============================================================================
 # SHAPE OVERRIDES (scroll wheel adjustments while Room Builder mode is active)
@@ -103,6 +252,8 @@ func _init(gl_api, logger, parent_mod = null):
 	_floor_state = RoomFloorState.new(_smart_tile_fill)
 	_wall_builder = WallBuilder.new(gl_api, logger, parent_mod)
 	_path_builder = PathBuilder.new(gl_api, logger, parent_mod)
+	outlines = [{"name": "Wall Default", "mode": OutlineMode.WALL, "settings": _wall_builder.get_settings()}]
+	active_outline_index = 0
 
 # ============================================================================
 # SUB-MODE
@@ -280,6 +431,11 @@ func _can_build(coords: Vector2, state: Dictionary, args: Array) -> bool:
 		return false
 	if active_sub_mode < 0 or active_sub_mode >= _supported_modes.size() or (not template and not _supported_modes[active_sub_mode]):
 		return false
+	if outlines.empty():
+		return false
+	for entry in outlines:
+		if entry.mode != OutlineMode.WALL and entry.mode != OutlineMode.PATH:
+			return false
 	if active_outline_mode != OutlineMode.WALL and active_outline_mode != OutlineMode.PATH:
 		return false
 	if active_fill_mode != FillMode.PATTERN and active_fill_mode != FillMode.TILES: return false
@@ -314,9 +470,14 @@ func _build_template_outline(marker: Dictionary) -> bool:
 	if marker.closed:
 		return _populate_marker_geometry(-1, marker.outline_points, false)
 	var level = BuildingPlannerUtils.resolve_level(_parent_mod)
-	var outline = _wall_builder._create_wall(marker.outline_points, level, false) if active_outline_mode == OutlineMode.WALL else _path_builder._create_path(marker.outline_points, level, false)
-	if not is_instance_valid(outline): return false
-	_operation._loose.walls.append(outline)
+	var entries = get_outline_entries()
+	if entries.empty(): return false
+	for entry in entries:
+		var entry_settings = entry.settings.duplicate()
+		entry_settings.active_offset = 0.0
+		var outline = _wall_builder._create_wall(marker.outline_points, level, false, entry_settings) if entry.mode == OutlineMode.WALL else _path_builder._create_path(marker.outline_points, level, false, entry_settings)
+		if not is_instance_valid(outline): return false
+		_operation._loose.walls.append(outline)
 	return true
 
 func _build_room(coords, args, color, marker: Dictionary = {}) -> bool:
@@ -447,37 +608,48 @@ func _populate_marker_geometry(id, polygon, keep_marker = true, levels: Array = 
 	if levels.empty():
 		levels = [_parent_mod.Global.World.Level]
 	if settings.empty():
-		var outline = _wall_builder if active_outline_mode == OutlineMode.WALL else _path_builder
-		settings = {"outline_mode": active_outline_mode, "fill_mode": active_fill_mode,
-			"fill": _smart_tile_fill.get_style() if active_fill_mode == FillMode.TILES else _pattern_fill.get_settings(), "outline": outline.get_settings()}
+		var entries = get_outline_entries()
+		var first_entry = entries[0] if not entries.empty() else {"mode": active_outline_mode, "settings": _builder_for_mode(active_outline_mode).get_settings()}
+		settings = {"outline_mode": first_entry.mode, "fill_mode": active_fill_mode,
+			"fill": _smart_tile_fill.get_style() if active_fill_mode == FillMode.TILES else _pattern_fill.get_settings(),
+			"outline": first_entry.settings, "outlines": entries}
 	var tiles = settings.get("fill_mode", FillMode.PATTERN) == FillMode.TILES
 	var floor_id = id if keep_marker else _floor_state.allocate_id()
 	var shapes = []
-	var outlines = []
-	var contours = BuildingPlannerUtils.prepare_outlines(BuildingPlannerUtils.region_outline({"polygon": polygon, "source_polygons": [polygon]}), settings.outline, LOGGER)
-	if contours.empty(): return false
-	var outline_settings = settings.outline.duplicate()
-	outline_settings.active_offset = 0.0
-	outline_settings.active_reverse_direction = false
+	var outlines_nodes = []
+	var outline_entries = settings.get("outlines", [])
+	if outline_entries.empty() and settings.has("outline"):
+		outline_entries = [{"mode": settings.get("outline_mode", OutlineMode.WALL), "settings": settings.outline}]
+	if outline_entries.empty(): return false
+	var region_outline = BuildingPlannerUtils.region_outline({"polygon": polygon, "source_polygons": [polygon]})
+	var prepared_outlines = []
+	for entry in outline_entries:
+		var contours = BuildingPlannerUtils.prepare_outlines(region_outline, entry.settings, LOGGER)
+		if contours.empty(): return false
+		var outline_settings = entry.settings.duplicate()
+		outline_settings.active_offset = 0.0
+		outline_settings.active_reverse_direction = false
+		prepared_outlines.append({"mode": entry.mode, "contours": contours, "settings": outline_settings})
 	var success = true
 	for level in levels:
 		if tiles and settings.fill.active_texture != null and not _floor_state.stage(floor_id, polygon, level, settings.fill): return false
 		var fill = _pattern_fill._create_shape(polygon, level, settings.fill) if not tiles and settings.fill.active_texture != null else null
 		if is_instance_valid(fill):
 			shapes.append(fill)
-		for contour in contours:
-			var outline = _wall_builder._create_wall(contour, level, true, outline_settings) if settings.outline_mode == OutlineMode.WALL else _path_builder._create_path(contour, level, true, outline_settings)
-			if is_instance_valid(outline):
-				outlines.append(outline)
-			else:
-				success = false
+		for item in prepared_outlines:
+			for contour in item.contours:
+				var outline = _wall_builder._create_wall(contour, level, true, item.settings) if item.mode == OutlineMode.WALL else _path_builder._create_path(contour, level, true, item.settings)
+				if is_instance_valid(outline):
+					outlines_nodes.append(outline)
+				else:
+					success = false
 		if not tiles and settings.fill.active_texture != null and not is_instance_valid(fill):
 			success = false
 	if keep_marker:
-		_registry.register(id, shapes, outlines, levels, settings)
+		_registry.register(id, shapes, outlines_nodes, levels, settings)
 	else:
 		_operation._loose.fills += shapes
-		_operation._loose.walls += outlines
+		_operation._loose.walls += outlines_nodes
 	return success
 
 func _cleanup_room(id):

@@ -3,6 +3,24 @@
 All notable changes to BuildingPlanner will be documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.3.6] — 2026-11-27
+
+### Added
+- **Multi-outline Room Builder:** replaced the single Wall/Path outline switch with
+  an ordered outline list starting with `Wall Default`, allowing rooms to combine
+  one floor with multiple independent `Wall` and `Path` outlines (each with its own
+  texture, color, offset, direction, width, layer, sorting, and effects).
+- Dedicated `+ Wall` and `+ Path` buttons, outline dropdown switching, `Rename`
+  dialog, and `Delete` (disabled when only one outline remains).
+- Live cursor preview renders the room floor together with every configured outline
+  layer; open template guides build all configured outlines with `offset = 0`.
+- Room templates persist and restore all configured room outlines with upfront
+  texture validation while remaining backward-compatible with older map templates.
+- Visually framed, collapsible `Floor` and `Walls & Outlines (N)` panels (`[-]` /
+  `[+]`) in the Room Builder sidebar.
+
+---
+
 ## [1.3.5] — 2026-11-23
 
 ### Fixed

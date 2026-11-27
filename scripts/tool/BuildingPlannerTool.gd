@@ -346,6 +346,14 @@ func add_room_template() -> bool:
 	template.panels = _room_style_defaults()
 	for settings in template.panels:
 		settings.texture = settings.texture.resource_path if settings.texture is Texture else ""
+	template.outlines = []
+	for entry in _room_builder.get_outline_entries():
+		var panel_settings = {}
+		for key in entry.settings:
+			var field = key.trim_prefix("active_")
+			var value = entry.settings[key]
+			panel_settings[field] = value.resource_path if value is Texture else ("" if field == "texture" else value)
+		template.outlines.append({"name": entry.name, "mode": entry.mode, "settings": panel_settings})
 	# Validate captured state with the same boundary used for map loading.
 	if not template.load_data(template.save(), _room_style_defaults()):
 		if LOGGER: LOGGER.warn("Room template could not be captured; check the current shape and assets.")

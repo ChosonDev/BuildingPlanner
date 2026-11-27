@@ -110,8 +110,7 @@ func test_late_api_registration_rebinds_existing_panels_and_invalidates_old_sele
 	ui._pb_path_panel._populated = true
 	ui._rb_sub_mode_selector.select(4)
 	ui._on_rb_sub_mode(4)
-	ui._rb_outline_mode_selector.select(1)
-	ui._on_rb_outline_mode(1)
+	ui._on_rb_outline_add(1)
 	ui._rb_pattern_panel.rotation_spin.value = 37
 	ui._rb_pattern_panel.rotation_spin.emit_signal("value_changed", 37.0)
 	ui._rb_pattern_panel.outline_check.pressed = true
@@ -353,9 +352,7 @@ func test_grid_initialization_only_visits_the_visible_mode_and_room_outline():
 		var state = PanelState.new()
 		ui.set(key, state)
 		panels.append(state)
-	ui._rb_outline_mode_selector = autofree(OptionButton.new())
-	ui._rb_outline_mode_selector.add_item("Wall")
-	ui._rb_outline_mode_selector.add_item("Path")
+	ui._rb_outline_selector = autofree(OptionButton.new())
 	ui.try_build_grid_menus(ui.Mode.WALL_BUILDER)
 	for i in range(panels.size()):
 		assert_eq(panels[i].builds, 1 if i == 1 else 0)
@@ -363,9 +360,8 @@ func test_grid_initialization_only_visits_the_visible_mode_and_room_outline():
 	assert_eq(panels[3].builds, 1)
 	assert_eq(panels[4].builds, 1)
 	assert_eq(panels[5].builds, 0)
-	ui._rb_outline_mode_selector.selected = 1
 	tool.is_enabled = true
-	ui._on_rb_outline_mode(1)
+	ui._on_rb_outline_add(1)
 	assert_eq(panels[4].builds, 1)
 	assert_eq(panels[5].builds, 1)
 	assert_eq(panels[6].builds, 0)

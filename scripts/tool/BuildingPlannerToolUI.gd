@@ -252,7 +252,7 @@ class FeaturePanel:
 		var texture = settings.texture
 		var path = texture.resource_path if texture is Texture else ""
 		var index = _index_to_path.find(path)
-		if index < 0 and texture is Texture:
+		if index < 0 and texture is Texture and path != "":
 			# Missing/filtered native catalog entries still have a usable map texture.
 			_index_to_path = _index_to_path.duplicate()
 			_index_to_path.append(path)
@@ -1066,16 +1066,30 @@ var _rb_name_dialog = null
 var _rb_name_edit = null
 var _rb_renaming_template = null
 var _rb_sub_mode_selector     = null   # OptionButton
+var _rb_floor_toggle          = null   # Button (collapsible Floor header)
+var _rb_floor_body            = null   # VBoxContainer
 var _rb_pattern_panel         = null   # PatternPanel
 var _rb_tile_panel = null
 var _rb_fill_selector = null
 var _rb_pattern_container = null
 var _rb_tile_container = null
-var _rb_outline_mode_selector = null   # OptionButton (Wall / Path)
+var _rb_outlines_toggle       = null   # Button (collapsible Outlines header)
+var _rb_outlines_body         = null   # VBoxContainer
+var _rb_outline_selector      = null   # OptionButton (room outlines list)
+var _rb_outline_add_wall      = null   # Button (+ Wall)
+var _rb_outline_add_path      = null   # Button (+ Path)
+var _rb_outline_rename        = null   # Button (Rename)
+var _rb_outline_delete        = null   # Button (Delete)
+var _rb_outline_name_dialog   = null   # ConfirmationDialog
+var _rb_outline_name_edit     = null   # LineEdit
+var _rb_renaming_outline_index = -1
+var _rb_draft_outlines        = [{"name": "Wall Default", "mode": 0, "settings": {}}]
+var _rb_draft_outline_index   = 0
+var _rb_draft_outlines_dirty  = false
 var _rb_wall_panel            = null   # WallPanel
-var _rb_wall_container        = null   # VBoxContainer — shown when outline mode = Wall
+var _rb_wall_container        = null   # VBoxContainer — shown when active outline = Wall
 var _rb_path_panel            = null   # PathPanel
-var _rb_path_container        = null   # VBoxContainer — shown when outline mode = Path
+var _rb_path_container        = null   # VBoxContainer — shown when active outline = Path
 
 # Roof Builder section
 var _rf_section    = null
@@ -1224,8 +1238,18 @@ func bind_features() -> void:
 	_wf_water_panel.bind_feature(_tool._water_fill)
 	if _rb_sub_mode_selector:
 		_on_rb_sub_mode(_rb_sub_mode_selector.selected)
-	if _rb_outline_mode_selector and _tool._room_builder:
-		_tool._room_builder.active_outline_mode = _rb_outline_mode_selector.selected
+	if _tool._room_builder and _rb_draft_outlines_dirty:
+		_save_draft_outline_from_panel()
+		var entries = []
+		for draft in _rb_draft_outlines:
+			var settings = _tool._room_builder.default_outline_settings(draft.mode)
+			for key in draft.settings:
+				settings["active_" + key] = draft.settings[key]
+			entries.append({"name": draft.name, "mode": draft.mode, "settings": settings})
+		_tool._room_builder.set_outlines(entries, _rb_draft_outline_index)
+		_rb_draft_outlines_dirty = false
+	if _rb_outline_selector:
+		_load_active_outline_into_ui()
 	if _rb_fill_selector and _tool._room_builder:
 		_tool._room_builder.active_fill_mode = _rb_fill_selector.selected
 	update_room_overrides()
@@ -1266,45 +1290,148 @@ func _build_room_builder_section() -> VBoxContainer:
 	sec.add_child(reset)
 	update_room_overrides()
 
-	sec.add_child(HSeparator.new())
+	sec.add_child(FeaturePanel._spacer(6))
+
+	# ---- Collapsible Floor panel ----
+	var floor_card = _build_collapsible_card("Floor", true)
+	_rb_floor_toggle = floor_card.toggle
+	_rb_floor_body = floor_card.body
+	sec.add_child(floor_card.panel)
+
 	_rb_fill_selector = OptionButton.new()
+	_rb_fill_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_rb_fill_selector.add_item("Pattern")
 	_rb_fill_selector.add_item("Smart Tiles")
 	_rb_fill_selector.connect("item_selected", self, "_on_rb_fill_selected")
-	sec.add_child(_rb_fill_selector)
+	_rb_floor_body.add_child(_rb_fill_selector)
 	_rb_pattern_container = _rb_pattern_panel.build()
 	_rb_tile_container = _rb_tile_panel.build()
 	_rb_tile_container.hide()
-	sec.add_child(_rb_pattern_container)
-	sec.add_child(_rb_tile_container)
+	_rb_floor_body.add_child(_rb_pattern_container)
+	_rb_floor_body.add_child(_rb_tile_container)
 
-	sec.add_child(HSeparator.new())
+	sec.add_child(FeaturePanel._spacer(6))
 
-	# ---- Outline mode selector ----
-	var outline_label = Label.new()
-	outline_label.text = "Outline:"
-	sec.add_child(outline_label)
+	# ---- Collapsible Walls & Outlines panel ----
+	var outlines_card = _build_collapsible_card("Walls & Outlines", true)
+	_rb_outlines_toggle = outlines_card.toggle
+	_rb_outlines_body = outlines_card.body
+	sec.add_child(outlines_card.panel)
 
-	_rb_outline_mode_selector = OptionButton.new()
-	_rb_outline_mode_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_rb_outline_mode_selector.add_item("Wall", 0)
-	_rb_outline_mode_selector.add_item("Path", 1)
-	_rb_outline_mode_selector.selected = 0
-	_rb_outline_mode_selector.connect("item_selected", self, "_on_rb_outline_mode")
-	sec.add_child(_rb_outline_mode_selector)
+	var outline_row = HBoxContainer.new()
+	_rb_outlines_body.add_child(outline_row)
 
-	sec.add_child(FeaturePanel._spacer(4))
+	_rb_outline_selector = OptionButton.new()
+	_rb_outline_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rb_outline_selector.clip_text = true
+	_rb_outline_selector.hint_tooltip = "Outlines built for this room. Add multiple walls or paths with independent settings."
+	_rb_outline_selector.connect("item_selected", self, "_on_rb_outline_selected")
+	outline_row.add_child(_rb_outline_selector)
 
-	# ---- Wall sub-panel (visible when Outline = Wall) ----
+	_rb_outline_rename = Button.new()
+	_rb_outline_rename.text = "Rename"
+	_rb_outline_rename.connect("pressed", self, "_on_rb_outline_rename")
+	outline_row.add_child(_rb_outline_rename)
+
+	_rb_outline_delete = Button.new()
+	_rb_outline_delete.text = "Delete"
+	_rb_outline_delete.connect("pressed", self, "_on_rb_outline_delete")
+	outline_row.add_child(_rb_outline_delete)
+
+	var outline_add_row = HBoxContainer.new()
+	_rb_outlines_body.add_child(outline_add_row)
+
+	_rb_outline_add_wall = Button.new()
+	_rb_outline_add_wall.text = "+ Wall"
+	_rb_outline_add_wall.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rb_outline_add_wall.connect("pressed", self, "_on_rb_outline_add", [0])
+	outline_add_row.add_child(_rb_outline_add_wall)
+
+	_rb_outline_add_path = Button.new()
+	_rb_outline_add_path.text = "+ Path"
+	_rb_outline_add_path.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rb_outline_add_path.connect("pressed", self, "_on_rb_outline_add", [1])
+	outline_add_row.add_child(_rb_outline_add_path)
+
+	_rb_outline_name_dialog = ConfirmationDialog.new()
+	_rb_outline_name_dialog.window_title = "Rename room outline"
+	_rb_outline_name_dialog.rect_min_size = Vector2(320, 100)
+	_rb_outline_name_edit = LineEdit.new()
+	_rb_outline_name_edit.max_length = 120
+	_rb_outline_name_edit.connect("text_entered", self, "_on_rb_outline_name_entered")
+	_rb_outline_name_edit.connect("focus_entered", self, "_on_room_name_focus", [true])
+	_rb_outline_name_edit.connect("focus_exited", self, "_on_room_name_focus", [false])
+	_rb_outline_name_dialog.add_child(_rb_outline_name_edit)
+	_rb_outline_name_dialog.connect("confirmed", self, "_on_rb_outline_name_confirmed")
+	sec.add_child(_rb_outline_name_dialog)
+
+	_rb_outlines_body.add_child(FeaturePanel._spacer(4))
+
+	# ---- Wall sub-panel (visible when active outline = Wall) ----
 	_rb_wall_container = _rb_wall_panel.build()
-	sec.add_child(_rb_wall_container)
+	_rb_outlines_body.add_child(_rb_wall_container)
 
-	# ---- Path sub-panel (visible when Outline = Path) ----
+	# ---- Path sub-panel (visible when active outline = Path) ----
 	_rb_path_container = _rb_path_panel.build()
 	_rb_path_container.visible = false
-	sec.add_child(_rb_path_container)
+	_rb_outlines_body.add_child(_rb_path_container)
+
+	rebuild_room_outlines()
 
 	return sec
+
+func _build_collapsible_card(title: String, expanded: bool = true) -> Dictionary:
+	var card = PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.14, 0.15, 0.17, 0.72)
+	style.border_color = Color(0.35, 0.38, 0.44, 0.85)
+	style.border_width_left = 1
+	style.border_width_right = 1
+	style.border_width_top = 1
+	style.border_width_bottom = 1
+	style.corner_radius_top_left = 4
+	style.corner_radius_top_right = 4
+	style.corner_radius_bottom_left = 4
+	style.corner_radius_bottom_right = 4
+	style.content_margin_left = 8
+	style.content_margin_right = 8
+	style.content_margin_top = 6
+	style.content_margin_bottom = 6
+	card.add_stylebox_override("panel", style)
+
+	var vbox = VBoxContainer.new()
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_constant_override("separation", 4)
+	card.add_child(vbox)
+
+	var toggle = Button.new()
+	toggle.toggle_mode = true
+	toggle.pressed = expanded
+	toggle.flat = true
+	toggle.align = Button.ALIGN_LEFT
+	toggle.focus_mode = Control.FOCUS_NONE
+	toggle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	toggle.set_meta("section_title", title)
+	toggle.text = ("[-] " if expanded else "[+] ") + title
+	vbox.add_child(toggle)
+
+	var body = VBoxContainer.new()
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.visible = expanded
+	vbox.add_child(body)
+
+	toggle.connect("toggled", self, "_on_collapsible_section_toggled", [toggle, body])
+	return {"panel": card, "toggle": toggle, "body": body}
+
+func _on_collapsible_section_toggled(expanded: bool, toggle: Button, body: Control) -> void:
+	if not expanded:
+		release_search_focus()
+	if is_instance_valid(body):
+		body.visible = expanded
+	if is_instance_valid(toggle):
+		var title = str(toggle.get_meta("section_title")) if toggle.has_meta("section_title") else ""
+		toggle.text = ("[-] " if expanded else "[+] ") + title
 
 func _build_room_templates(sec):
 	var row = HBoxContainer.new()
@@ -1414,6 +1541,7 @@ func apply_room_template(template) -> bool:
 				if texture and texture.resource_path == tile_style.texture: tile_texture = texture
 		if tile_texture == null: return false
 	tile_style.texture = tile_texture
+	var resolved_assets = {}
 	# Resolve every asset before touching settings, so missing packs cannot apply half a style.
 	for i in range(3):
 		var settings = template.panels[i].duplicate(true)
@@ -1427,12 +1555,38 @@ func apply_room_template(template) -> bool:
 			else:
 				if not asset_script or not asset_script.has_method("GetAssetList") or not asset_script.has_method("GetAssetTexture"): return false
 				var category = "Walls" if i == 1 else "Paths"
+				var cache_key = category + ":" + path
+				if resolved_assets.has(cache_key):
+					settings.texture = resolved_assets[cache_key]
 				# Native GetAssetTexture indexes Reverse[path] and throws for a missing asset.
-				if path in asset_script.GetAssetList(category): settings.texture = asset_script.GetAssetTexture(category, path)
+				elif path in asset_script.GetAssetList(category):
+					settings.texture = asset_script.GetAssetTexture(category, path)
+					resolved_assets[cache_key] = settings.texture
 			if not settings.texture is Texture:
 				if LOGGER: LOGGER.warn("Room template texture is unavailable: %s" % path)
 				return false
 		restored.append(settings)
+	var restored_outlines = []
+	for entry in template.outlines:
+		var settings = entry.settings.duplicate(true)
+		var path = settings.texture
+		settings.texture = null
+		if path != "":
+			if not asset_script or not asset_script.has_method("GetAssetList") or not asset_script.has_method("GetAssetTexture"): return false
+			var category = "Walls" if entry.mode == 0 else "Paths"
+			var cache_key = category + ":" + path
+			if resolved_assets.has(cache_key):
+				settings.texture = resolved_assets[cache_key]
+			elif path in asset_script.GetAssetList(category):
+				settings.texture = asset_script.GetAssetTexture(category, path)
+				resolved_assets[cache_key] = settings.texture
+			if not settings.texture is Texture:
+				if LOGGER: LOGGER.warn("Room template outline texture is unavailable: %s" % path)
+				return false
+		var active_settings = {}
+		for key in settings:
+			active_settings["active_" + key] = settings[key]
+		restored_outlines.append({"name": entry.name, "mode": entry.mode, "settings": active_settings})
 	for i in range(3):
 		panels[i].try_build_grid_menu(_tool.parent_mod.Global)
 		panels[i].apply_sample(restored[i])
@@ -1444,10 +1598,14 @@ func apply_room_template(template) -> bool:
 	if _rb_path_panel.color_picker.disabled:
 		_rb_path_panel.color_picker.color = Color.white
 		_rb_path_panel._set_field("color", Color.white)
+		for entry in restored_outlines:
+			if entry.mode == 1:
+				entry.settings["active_color"] = Color.white
 	_rb_sub_mode_selector.select(template.sub_mode)
 	_on_rb_sub_mode(template.sub_mode)
-	_rb_outline_mode_selector.select(template.outline_mode)
-	_on_rb_outline_mode(template.outline_mode)
+	if not restored_outlines.empty():
+		_tool._room_builder.set_outlines(restored_outlines, 0)
+	_load_active_outline_into_ui()
 	_tool._room_builder.shape_angle_offset = template.angle
 	_tool._room_builder.shape_scale_factor = template.scale
 	update_room_overrides()
@@ -1561,7 +1719,7 @@ func try_build_grid_menus(mode: int) -> void:
 				_rb_tile_panel.try_build_grid_menu(gl)
 			else:
 				_rb_pattern_panel.try_build_grid_menu(gl)
-			if _rb_outline_mode_selector.selected == 0:
+			if _active_rb_outline_mode() == 0:
 				_rb_wall_panel.try_build_grid_menu(gl)
 			else:
 				_rb_path_panel.try_build_grid_menu(gl)
@@ -1585,6 +1743,8 @@ func try_build_grid_menus(mode: int) -> void:
 func release_search_focus() -> void:
 	if is_instance_valid(_rb_name_edit) and _rb_name_edit.has_focus():
 		_rb_name_edit.release_focus()
+	if is_instance_valid(_rb_outline_name_edit) and _rb_outline_name_edit.has_focus():
+		_rb_outline_name_edit.release_focus()
 	for panel in _all_panels:
 		if panel and panel._sg:
 			panel._sg.release_search_focus()
@@ -1670,16 +1830,213 @@ func _on_rb_fill_selected(index: int):
 	_rb_tile_container.visible = index == 1
 	if _tool.is_enabled: try_build_grid_menus(Mode.ROOM_BUILDER)
 
-func _on_rb_outline_mode(index: int):
-	release_search_focus()
-	if _tool._room_builder:
-		_tool._room_builder.active_outline_mode = index
+func _active_rb_outline_mode() -> int:
+	if _tool and _tool._room_builder:
+		return _tool._room_builder.active_outline_mode
+	if _rb_draft_outline_index >= 0 and _rb_draft_outline_index < _rb_draft_outlines.size():
+		return _rb_draft_outlines[_rb_draft_outline_index].mode
+	return 0
+
+func _rb_outline_list() -> Array:
+	if _tool and _tool._room_builder:
+		return _tool._room_builder.outlines
+	return _rb_draft_outlines
+
+func _rb_outline_index() -> int:
+	if _tool and _tool._room_builder:
+		return _tool._room_builder.active_outline_index
+	return _rb_draft_outline_index
+
+func _next_draft_outline_name(mode: int) -> String:
+	var prefix = "Wall" if mode == 0 else "Path"
+	var used = {}
+	for entry in _rb_draft_outlines:
+		used[entry.name] = true
+	var n = 1
+	while used.has("%s %d" % [prefix, n]):
+		n += 1
+	return "%s %d" % [prefix, n]
+
+func _save_draft_outline_from_panel() -> void:
+	if _rb_draft_outline_index < 0 or _rb_draft_outline_index >= _rb_draft_outlines.size():
+		return
+	var entry = _rb_draft_outlines[_rb_draft_outline_index]
+	var panel = _rb_wall_panel if entry.mode == 0 else _rb_path_panel
+	if panel:
+		entry.settings = panel._settings.duplicate()
+
+func rebuild_room_outlines() -> void:
+	if not _rb_outline_selector:
+		return
+	var list = _rb_outline_list()
+	var selected = _rb_outline_index()
+	_rb_outline_selector.clear()
+	for entry in list:
+		_rb_outline_selector.add_item(entry.name)
+	if selected >= 0 and selected < list.size():
+		_rb_outline_selector.select(selected)
+	if _rb_outline_delete:
+		_rb_outline_delete.disabled = list.size() <= 1
+	if _rb_outline_rename:
+		_rb_outline_rename.disabled = list.empty()
+	if _rb_outlines_toggle:
+		var title = "Walls & Outlines (%d)" % list.size()
+		_rb_outlines_toggle.set_meta("section_title", title)
+		_rb_outlines_toggle.text = ("[-] " if _rb_outlines_toggle.pressed else "[+] ") + title
+	if _rb_outline_name_dialog:
+		_rb_outline_name_dialog.hide()
+
+func _sync_panel_from_outline(panel, active_settings: Dictionary) -> void:
+	if not panel or not panel.has_method("apply_sample") or active_settings.empty():
+		return
+	var panel_settings = {}
+	for key in active_settings:
+		panel_settings[key.trim_prefix("active_")] = active_settings[key]
+	if panel._populated:
+		panel.apply_sample(panel_settings)
+		return
+	var texture = panel_settings.get("texture")
+	if texture is Texture:
+		panel._selection_path = texture.resource_path
+	for setting in panel_settings:
+		var value = panel_settings[setting]
+		if panel._controls.has(setting):
+			var control = panel._controls[setting]
+			control.set_block_signals(true)
+			if control is OptionButton:
+				if setting == "layer":
+					var found = false
+					for i in range(control.get_item_count()):
+						if control.get_item_id(i) == value: found = true
+					if not found: control.add_item(str(value) + ": Layer", value)
+					panel._select_layer_option(value)
+				else: control.select(value)
+			elif control is BaseButton: control.pressed = bool(value)
+			elif control is Range:
+				control.min_value = min(control.min_value, value)
+				control.max_value = max(control.max_value, value)
+				var step = control.step
+				control.step = 0.0
+				control.value = value
+				control.step = step
+				if control is SpinBox: control.get_line_edit().text = str(control.value)
+				value = control.value
+			control.set_block_signals(false)
+		panel._set_field(setting, value)
+	if panel.color_picker and panel_settings.has("color"):
+		panel.color_picker.color = panel_settings.color
+
+func _load_active_outline_into_ui(build_grids: bool = true) -> void:
+	rebuild_room_outlines()
+	var list = _rb_outline_list()
+	var idx = _rb_outline_index()
+	var mode = _active_rb_outline_mode()
 	if _rb_wall_container:
-		_rb_wall_container.visible = (index == 0)
+		_rb_wall_container.visible = (mode == 0)
 	if _rb_path_container:
-		_rb_path_container.visible = (index == 1)
-	if _tool.is_enabled:
+		_rb_path_container.visible = (mode == 1)
+	var panel = _rb_wall_panel if mode == 0 else _rb_path_panel
+	if build_grids and _tool and _tool.is_enabled:
 		try_build_grid_menus(Mode.ROOM_BUILDER)
+	if idx >= 0 and idx < list.size() and panel:
+		var entry = list[idx]
+		if _tool and _tool._room_builder:
+			_sync_panel_from_outline(panel, entry.settings)
+		else:
+			var prefixed = {}
+			for key in entry.settings:
+				prefixed["active_" + key] = entry.settings[key]
+			_sync_panel_from_outline(panel, prefixed)
+	var gl = _tool.parent_mod.Global if _tool and _tool.parent_mod else null
+	if mode == 1 and gl and gl.get("ModMapData") is Dictionary and _rb_path_panel and _rb_path_panel.has_method("update_camt_color_state"):
+		_rb_path_panel.update_camt_color_state(gl)
+		var picker = _rb_path_panel.get("color_picker")
+		if picker and picker.disabled:
+			picker.color = Color.white
+			_rb_path_panel._set_field("color", Color.white)
+
+func _on_rb_outline_selected(index: int):
+	release_search_focus()
+	_tool.cancel_sampling()
+	if _tool and _tool._room_builder:
+		if not _tool._room_builder.select_outline(index):
+			return
+	else:
+		if index < 0 or index >= _rb_draft_outlines.size():
+			return
+		_save_draft_outline_from_panel()
+		_rb_draft_outline_index = index
+		_rb_draft_outlines_dirty = true
+	_load_active_outline_into_ui()
+
+func _on_rb_outline_add(mode: int):
+	release_search_focus()
+	_tool.cancel_sampling()
+	var gl = _tool.parent_mod.Global if _tool and _tool.parent_mod else null
+	var built_target_grid = false
+	if _tool and _tool._room_builder:
+		_tool._room_builder.sync_active_outline_from_builder()
+		var target_panel = _rb_wall_panel if mode == 0 else _rb_path_panel
+		if gl and gl.get("Editor") != null and target_panel and not target_panel.get("_populated"):
+			target_panel.try_build_grid_menu(gl)
+			built_target_grid = true
+			if mode == 1 and gl.get("ModMapData") is Dictionary and target_panel.has_method("update_camt_color_state"):
+				target_panel.update_camt_color_state(gl)
+		if _tool._room_builder.add_outline(mode) < 0:
+			return
+	else:
+		_save_draft_outline_from_panel()
+		_rb_draft_outlines.append({"name": _next_draft_outline_name(mode), "mode": mode, "settings": {}})
+		_rb_draft_outline_index = _rb_draft_outlines.size() - 1
+		_rb_draft_outlines_dirty = true
+	_load_active_outline_into_ui(not built_target_grid)
+
+func _on_rb_outline_delete():
+	release_search_focus()
+	_tool.cancel_sampling()
+	if _tool and _tool._room_builder:
+		if not _tool._room_builder.remove_outline(_tool._room_builder.active_outline_index):
+			return
+	else:
+		if _rb_draft_outlines.size() <= 1:
+			return
+		_rb_draft_outlines.remove(_rb_draft_outline_index)
+		if _rb_draft_outline_index >= _rb_draft_outlines.size():
+			_rb_draft_outline_index = _rb_draft_outlines.size() - 1
+		_rb_draft_outlines_dirty = true
+	_load_active_outline_into_ui()
+
+func _on_rb_outline_rename():
+	var list = _rb_outline_list()
+	var index = _rb_outline_index()
+	if index < 0 or index >= list.size():
+		return
+	_rb_renaming_outline_index = index
+	_rb_outline_name_edit.text = list[index].name
+	_rb_outline_name_dialog.popup_centered()
+	_rb_outline_name_edit.grab_focus()
+	_rb_outline_name_edit.select_all()
+
+func _on_rb_outline_name_entered(_text):
+	_on_rb_outline_name_confirmed()
+
+func _on_rb_outline_name_confirmed():
+	var text = _rb_outline_name_edit.text.strip_edges()
+	var index = _rb_renaming_outline_index
+	if text.empty():
+		return
+	if _tool and _tool._room_builder:
+		if not _tool._room_builder.rename_outline(index, text):
+			return
+	else:
+		if index < 0 or index >= _rb_draft_outlines.size():
+			return
+		_rb_draft_outlines[index].name = text
+		_rb_draft_outlines_dirty = true
+	if _rb_outline_name_edit.has_focus():
+		_rb_outline_name_edit.release_focus()
+	_rb_renaming_outline_index = -1
+	rebuild_room_outlines()
 
 func update_room_overrides() -> void:
 	if _rb_override_label:

@@ -76,37 +76,56 @@ func refresh_room_preview(room, position: Vector2, state: Dictionary) -> void:
 		clear_preview()
 		return
 	var fill_settings = room.get_fill_preview_settings()
-	var path = room.active_outline_mode == room.OutlineMode.PATH
-	var outline_settings = (room._path_builder if path else room._wall_builder).get_settings()
+	var outline_entries = room.get_outline_entries()
+	var outline_key = []
+	for entry in outline_entries:
+		outline_key.append([entry.mode, entry.settings.values()])
 	# Settings are flat snapshots. Compare their values, not Dictionary identities.
-	var key = [geometry, fill_settings.values(), outline_settings.values(), path]
+	var key = [geometry, fill_settings.values(), outline_key]
 	if key == _room_preview_state: return
 	if not preview.empty() or not _context.empty(): clear_preview()
-	for j in range(geometry.size() * 2, _room_previews.size()):
+	var slots_per_marker = 1 + outline_entries.size()
+	for j in range(geometry.size() * slots_per_marker, _room_previews.size()):
 		_room_previews[j].clear_preview()
 	_room_preview_state = key
 	for i in range(geometry.size()):
-		while _room_previews.size() < (i + 1) * 2:
+		while _room_previews.size() < (i + 1) * slots_per_marker:
 			var renderer = TexturePreview.new()
 			add_child(renderer)
 			_room_previews.append(renderer)
+		var base = i * slots_per_marker
 		var marker = geometry[i]
 		var fill = marker.marker_type == "Shape" or marker.get("closed", false)
 		var points = marker.polygon if marker.marker_type == "Shape" else marker.outline_points
 		var outline = Utils.region_outline({"polygon": points, "source_polygons": [points]}) if fill else {"points": points, "closed": false}
-		var contours = Utils.prepare_outlines(outline, outline_settings)
-		if contours.empty():
-			_room_previews[i * 2].clear_preview()
-			_room_previews[i * 2 + 1].clear_preview()
+		var prepared = []
+		var valid = not outline_entries.empty()
+		for k in range(outline_entries.size()):
+			var entry = outline_entries[k]
+			var is_path = entry.mode == room.OutlineMode.PATH
+			var entry_settings = entry.settings
+			if not fill and entry_settings.get("active_offset", 0.0) != 0.0:
+				entry_settings = entry_settings.duplicate()
+				entry_settings.active_offset = 0.0
+			var contours = Utils.prepare_outlines(outline, entry_settings)
+			if contours.empty():
+				valid = false
+				break
+			if is_path:
+				for j in range(contours.size()):
+					contours[j] = Utils.path_preview_points(contours[j], fill, entry_settings.active_smoothness)
+			prepared.append({"contours": contours, "settings": entry_settings, "is_path": is_path})
+		if not valid:
+			for s in range(slots_per_marker):
+				_room_previews[base + s].clear_preview()
 			continue
 		if fill:
-			_room_previews[i * 2].sync_preview({"points": points, "fill": true, "closed": true}, fill_settings, false, room._parent_mod)
+			_room_previews[base].sync_preview({"points": points, "fill": true, "closed": true}, fill_settings, false, room._parent_mod)
 		else:
-			_room_previews[i * 2].clear_preview()
-		if path:
-			for j in range(contours.size()):
-				contours[j] = Utils.path_preview_points(contours[j], fill, outline_settings.active_smoothness)
-		_room_previews[i * 2 + 1].sync_preview({"points": contours[0], "contours": contours, "closed": fill, "fill": false}, outline_settings, path, room._parent_mod)
+			_room_previews[base].clear_preview()
+		for k in range(prepared.size()):
+			var item = prepared[k]
+			_room_previews[base + 1 + k].sync_preview({"points": item.contours[0], "contours": item.contours, "closed": fill, "fill": false}, item.settings, item.is_path, room._parent_mod)
 
 func _unavailable(reason: String) -> void:
 	if preview.size() == 1 and preview.get("reason") == reason: return
