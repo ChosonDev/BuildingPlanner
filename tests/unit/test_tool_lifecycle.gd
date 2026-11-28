@@ -729,3 +729,119 @@ func test_room_click_prefers_shape_snapshot_and_keeps_full_state_compatibility()
 	assert_eq(tool._gl_api.queries, 1)
 	tool._room_builder = null
 	tool.shutdown()
+
+
+class MockEditor:
+	extends Control
+	var Tools = {}
+	var SearchHasFocus = false
+
+
+func _make_mock_editor_with_content(tools_material = null):
+	var editor = autofree(MockEditor.new())
+	editor.name = "Editor"
+	var vpart = Control.new()
+	vpart.name = "VPartition"
+	editor.add_child(vpart)
+	var panels = Control.new()
+	panels.name = "Panels"
+	vpart.add_child(panels)
+	var tools = PanelContainer.new()
+	tools.name = "Tools"
+	if tools_material != null:
+		tools.material = tools_material
+	panels.add_child(tools)
+	var hsplit = Control.new()
+	hsplit.name = "HSplit"
+	panels.add_child(hsplit)
+	var content = Control.new()
+	content.name = "Content"
+	content.rect_size = Vector2(1280, 720)
+	hsplit.add_child(content)
+	add_child(editor)
+	return {"editor": editor, "content": content}
+
+
+func test_right_resource_panel_attaches_to_content_tracks_modes_and_cleans_up():
+	var mat = CanvasItemMaterial.new()
+	var host = _make_mock_editor_with_content(mat)
+	var tool = Tool.new({"Global": {"Root": mod_root + "/", "World": null, "API": {}, "ModMapData": {}, "Editor": host.editor}})
+	var ui = UI.new(tool, null)
+	var left_panel = autofree(VBoxContainer.new())
+	ui.build(left_panel)
+	tool._ui = ui
+
+	var rp = ui._right_panel
+	assert_true(is_instance_valid(rp))
+	assert_true(rp.get_parent() == host.content, "Right resource panel attaches to Editor Content")
+	assert_true(rp.material == mat, "Inherits host Tools material like GuidesLines floating panels")
+	assert_eq(rp.anchor_left, 1.0)
+	assert_eq(rp.anchor_right, 1.0)
+	assert_eq(rp.anchor_top, 0.0)
+	assert_eq(rp.anchor_bottom, 1.0)
+	assert_eq(rp.mouse_filter, Control.MOUSE_FILTER_STOP)
+	assert_false(rp.visible, "Hidden while tool is disabled")
+
+	# Every panel's SearchableGrid lives inside the right panel, not the left sidebar.
+	for section in [ui._pf_pattern_panel, ui._pf_tile_panel, ui._wb_wall_panel, ui._pb_path_panel,
+			ui._rb_pattern_panel, ui._rb_tile_panel, ui._rb_wall_panel, ui._rb_path_panel, ui._rf_roof_panel]:
+		assert_true(rp.is_a_parent_of(section._sg._container), "Resource grid belongs to right panel")
+		assert_false(left_panel.is_a_parent_of(section._sg._container), "Resource grid removed from left sidebar")
+
+	# Enable -> visible for Floor Fill (Pattern), switches to Smart Tiles.
+	tool.Enable()
+	assert_true(rp.visible)
+	assert_true(ui._pf_pattern_resource.visible)
+	assert_false(ui._pf_tile_resource.visible)
+	ui._pf_fill_selector.select(1)
+	ui._on_floor_fill_selected(1)
+	assert_false(ui._pf_pattern_resource.visible)
+	assert_true(ui._pf_tile_resource.visible)
+
+	# Wall, Path, Roof modes show only their matching resource card.
+	ui._mode_selector.select(1)
+	ui._on_mode_selected(1)
+	assert_true(rp.visible and ui._wb_wall_resource.visible and not ui._pb_path_resource.visible)
+
+	ui._mode_selector.select(2)
+	ui._on_mode_selected(2)
+	assert_true(rp.visible and ui._pb_path_resource.visible and not ui._wb_wall_resource.visible)
+
+	ui._mode_selector.select(4)
+	ui._on_mode_selected(4)
+	assert_true(rp.visible and ui._rf_roof_resource.visible)
+
+	# Room Builder shows Floor + Outline slots and updates headers when switching.
+	ui._mode_selector.select(3)
+	ui._on_mode_selected(3)
+	assert_true(rp.visible and ui._rb_resource.visible)
+	assert_true(ui._rb_pattern_resource_slot.visible and not ui._rb_tile_resource_slot.visible)
+	assert_eq(ui._rb_floor_resource_header.text, "Floor Pattern")
+	assert_true(ui._rb_wall_resource_slot.visible and not ui._rb_path_resource_slot.visible)
+	assert_eq(ui._rb_outline_resource_header.text, "Outline: Wall Default")
+	ui._rb_fill_selector.select(1)
+	ui._on_rb_fill_selected(1)
+	assert_true(ui._rb_tile_resource_slot.visible and not ui._rb_pattern_resource_slot.visible)
+	assert_eq(ui._rb_floor_resource_header.text, "Floor Smart Tiles")
+	ui._on_rb_outline_add(1)
+	assert_true(ui._rb_path_resource_slot.visible and not ui._rb_wall_resource_slot.visible)
+	assert_eq(ui._rb_outline_resource_header.text, "Outline: Path 1")
+
+	# Water Fill has no texture grid -> hides right panel automatically.
+	ui._mode_selector.select(5)
+	ui._on_mode_selected(5)
+	assert_false(rp.visible, "Water Fill hides right resource panel")
+
+	# Switching back to Wall Builder restores visibility; Disable hides it.
+	ui._mode_selector.select(1)
+	ui._on_mode_selected(1)
+	assert_true(rp.visible)
+	tool.Disable()
+	assert_false(rp.visible)
+
+	# Shutdown detaches and frees the right panel from Editor Content.
+	tool.shutdown()
+	assert_null(ui._right_panel)
+	assert_eq(host.content.get_child_count(), 0)
+	yield(get_tree(), "idle_frame")
+	assert_false(is_instance_valid(rp))

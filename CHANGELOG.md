@@ -3,6 +3,28 @@
 All notable changes to BuildingPlanner will be documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.3.7] — 2026-11-28
+
+### Changed
+- **Docked right-side Resources panel:** moved all material/texture selection grids
+  (search bar, eyedropper `Pick` button, and scrollable `ItemList` for Patterns,
+  Smart Tiles, Walls, Paths, and Roofs) out of the left sidebar into a dedicated
+  floating panel anchored to the right edge of the editor canvas, styled with
+  Dungeondraft's native `Tools` panel material (matching `GuidesLines`).
+- **Mode-aware resource display:** the right-side panel expands grids vertically
+  to use the full panel height, displays stacked **Floor** and **Outline: `<name>`**
+  resource cards in Room Builder (updating dynamically as you switch floor mode or
+  room outlines), and hides automatically in Water Fill mode or when switching to
+  another Dungeondraft tool.
+- **Unified left sidebar styling:** reorganized the left tool panel into framed
+  section cards (`Mode`, `Floor Fill`, `Wall Settings`, `Path Settings`,
+  `Room Setup`, `Floor`, `Walls & Outlines`, `Roof Settings`, `Water Fill`) matching
+  the visual language of `GuidesLines`.
+- Guarded canvas hover previews, clicks, and scroll-wheel overrides against cursor
+  input over the right-side resource panel.
+
+---
+
 ## [1.3.6] — 2026-11-27
 
 ### Added

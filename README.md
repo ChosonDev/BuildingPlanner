@@ -1,6 +1,6 @@
 # Building Planner
 
-**Version:** 1.3.6
+**Version:** 1.3.7
 **Author:** Choson  
 **Depends on:** [CreepyCre._Lib](https://github.com/CreepyCre/_Lib) · [GuidesLines](https://github.com/ChosonDev/GuidesLines) (v2.4.5+)
 
@@ -8,7 +8,18 @@
 
 Generate Dungeondraft map content directly from [GuidesLines](https://github.com/ChosonDev/GuidesLines) markers.
 Select the **Building Planner** tool in the *Design* category of the Dungeondraft toolbar,
-then choose a mode from the sidebar.
+then choose a mode from the left sidebar.
+
+## Interface Layout
+
+- **Left sidebar (`Building Planner`):** mode selector and framed setting cards
+  (colors, offsets, layers, room templates, outline management, lighting, and water).
+- **Right docked panel (`Resources`):** hosts the searchable texture/material grids
+  and eyedropper **Pick** button for the active mode (Floor Pattern, Smart Tiles,
+  Wall Texture, Path Texture, Roof Style). In **Room Builder**, the panel shows
+  stacked **Floor** and **Outline: `<name>`** resource cards simultaneously. In
+  **Water Fill** (or when another Dungeondraft tool is active), the right panel
+  hides automatically.
 
 ## Features
 
@@ -352,7 +363,7 @@ clipped polygons. Acts as a no-op when no existing markers overlap the click pos
 Optional: **Lievven.Snappy_Mod** — detected automatically; no configuration needed.  
 Optional: **[ColourAndModifyThings](https://github.com/Uchideshi/ColourAndModifyThings)** — enables path color picker in Path Builder and Room Builder (color persists across map reloads).
 
-BuildingPlanner 1.3.6 requires GuidesLines 2.4.5 or later, including its template,
+BuildingPlanner 1.3.7 requires GuidesLines 2.4.5 or later, including its template,
 geometry and history-capture APIs. Dungeondraft's manifest dependency list records
 mod IDs only; install the required GuidesLines version separately. Missing API
 capabilities disable the affected preview and placement before changing the map.

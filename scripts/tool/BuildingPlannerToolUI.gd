@@ -1,23 +1,16 @@
 extends Reference
 
 # BuildingPlanner - Dungeondraft Mod
-# Sidebar UI panel for the BuildingPlanner tool.
+# Sidebar UI panel and docked right-side resource panel for the BuildingPlanner tool.
 #
 # Layout
-#   Title
-#   Mode OptionButton  (Pattern Fill / Wall Builder / Path Builder / Room Builder / Roof Builder)
-#   ── section: Pattern Fill ──────────────────────────────────────
-#     PatternPanel  (pattern grid, color, rotation, layer, outline)
-#   ── section: Wall Builder ──────────────────────────────────────
-#     WallPanel  (wall grid, color, shadow, bevel)
-#   ── section: Path Builder ──────────────────────────────────────
-#     PathPanel  (path grid, color, width, smoothness, layer, sorting, effects)
-#   ── section: Room Builder ──────────────────────────────────────
-#     Sub-mode (Single/Merge/Conforming/Wrapping/Difference), wheel overrides/reset
-#     PatternPanel  (pattern grid, color, rotation, layer, outline)
-#     Outline (Wall/Path), WallPanel or PathPanel
-#   ── section: Roof Builder ──────────────────────────────────────
-#     RoofPanel  (roof style grid, width, type, sorting, shade)
+#   Left Sidebar (ToolPanel):
+#     Title ("Building Planner")
+#     Mode card (Floor Fill / Wall Builder / Path Builder / Room Builder / Roof Builder / Water Fill)
+#     Active mode settings card(s) (color, rotation, layer, offsets, effects, room setup, water)
+#   Right Floating/Docked Panel (inside Editor Content):
+#     Active mode resource grid(s) with search bar & eyedropper Pick button
+#     (Pattern / Smart Tiles / Wall / Path / Room Floor + Outline / Roof; hidden in Water Fill)
 
 const CLASS_NAME = "BuildingPlannerToolUI"
 const BuildingPlannerUtils = preload("../utils/BuildingPlannerUtils.gd")
@@ -69,9 +62,11 @@ class SearchableGrid:
 
 	## Build and return a VBoxContainer containing the search bar + ItemList.
 	## Call once; insert the returned node into your panel's layout.
-	func build() -> VBoxContainer:
+	func build(expand_vertical: bool = false) -> VBoxContainer:
 		_container = VBoxContainer.new()
 		_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if expand_vertical:
+			_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
 
 		# ---- Search bar ----
 		var hbox = HBoxContainer.new()
@@ -96,8 +91,10 @@ class SearchableGrid:
 
 		# ---- ItemList inside a ScrollContainer ----
 		_scroll = ScrollContainer.new()
-		_scroll.rect_min_size = Vector2(0, 160)
+		_scroll.rect_min_size = Vector2(0, 120 if expand_vertical else 160)
 		_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if expand_vertical:
+			_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 
 		_grid_menu = ItemList.new()
 		_grid_menu.icon_mode    = ItemList.ICON_MODE_TOP
@@ -433,9 +430,9 @@ class FeaturePanel:
 		parent.add_child(control)
 		return control
 
-	func _add_grid(parent):
+	func _add_grid(parent, expand_vertical: bool = false):
 		_sg = SearchableGrid.new()
-		parent.add_child(_sg.build())
+		parent.add_child(_sg.build(expand_vertical))
 		sample_button = Button.new()
 		sample_button.text = "Pick"
 		sample_button.toggle_mode = true
@@ -512,13 +509,20 @@ class SmartTilePanel:
 	var allow_empty = false
 	var allow_erase = true
 
-	func build() -> VBoxContainer:
+	func build(grid_parent = null) -> VBoxContainer:
 		var sec = VBoxContainer.new()
-		sec.add_child(_label("Smart Tiles:"))
+		sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sec.add_constant_override("separation", 6)
 		var note = _label("Hover previews up to 4096 cells.")
 		note.autowrap = true
-		sec.add_child(note)
-		_add_grid(sec)
+		if grid_parent != null:
+			note.add_color_override("font_color", Color(0.75, 0.78, 0.84, 0.85))
+			grid_parent.add_child(note)
+			_add_grid(grid_parent, true)
+		else:
+			sec.add_child(_label("Smart Tiles:"))
+			sec.add_child(note)
+			_add_grid(sec)
 		color_picker = _add_color_picker(sec)
 		if allow_erase: _add_check(sec, "Erase native floor in region", "erase", false)
 		return sec
@@ -569,15 +573,17 @@ class PatternPanel:
 	## Build and return a VBoxContainer with all controls.
 	## The pattern grid is built immediately via SearchableGrid; items are
 	## populated lazily in try_build_grid_menu().
-	func build() -> VBoxContainer:
+	func build(grid_parent = null) -> VBoxContainer:
 		var sec = VBoxContainer.new()
 		sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sec.add_constant_override("separation", 6)
 
-		sec.add_child(_label("Pattern:"))
-
-		_add_grid(sec)
-
-		sec.add_child(_spacer(6))
+		if grid_parent != null:
+			_add_grid(grid_parent, true)
+		else:
+			sec.add_child(_label("Pattern:"))
+			_add_grid(sec)
+			sec.add_child(_spacer(6))
 
 		color_picker = _add_color_picker(sec)
 
@@ -650,19 +656,20 @@ class WallPanel:
 		_asset_script = asset_script
 
 	## Build and return a VBoxContainer with all controls.
-	func build() -> VBoxContainer:
+	func build(grid_parent = null) -> VBoxContainer:
 		var sec = VBoxContainer.new()
 		sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sec.add_constant_override("separation", 6)
 
-		sec.add_child(_label("Wall:"))
-
-		_add_grid(sec)
-
-		sec.add_child(_spacer(6))
+		if grid_parent != null:
+			_add_grid(grid_parent, true)
+		else:
+			sec.add_child(_label("Wall:"))
+			_add_grid(sec)
+			sec.add_child(_spacer(6))
 
 		color_picker = _add_color_picker(sec)
 
-		sec.add_child(_spacer(4))
 		offset_spin = _add_range(sec, "Offset (px):", "offset", -8192.0, 8192.0, 1.0, 0.0)
 		offset_spin.hint_tooltip = "Closed outlines: + outward, - inward. Moves the wall, not its texture width. Open Paths/Lines require 0."
 		reverse_check = _add_check(sec, "Reverse direction", "reverse_direction", false)
@@ -725,15 +732,17 @@ class PathPanel:
 		_asset_script = asset_script
 
 	## Build and return a VBoxContainer with all controls.
-	func build() -> VBoxContainer:
+	func build(grid_parent = null) -> VBoxContainer:
 		var sec = VBoxContainer.new()
 		sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sec.add_constant_override("separation", 6)
 
-		sec.add_child(_label("Path:"))
-
-		_add_grid(sec)
-
-		sec.add_child(_spacer(6))
+		if grid_parent != null:
+			_add_grid(grid_parent, true)
+		else:
+			sec.add_child(_label("Path:"))
+			_add_grid(sec)
+			sec.add_child(_spacer(6))
 
 		color_picker = _add_color_picker(sec)
 
@@ -749,7 +758,7 @@ class PathPanel:
 
 		sorting_option = _add_option(sec, "Sorting:", ["Over", "Under"], "sorting")
 
-		sec.add_child(_spacer(4))
+		sec.add_child(HSeparator.new())
 
 		fade_in_check = _add_check(sec, "Fade In", "fade_in", false)
 
@@ -824,16 +833,18 @@ class RoofPanel:
 
 	## Build and return a VBoxContainer with all controls.
 	## The style grid is populated when the host catalog becomes available.
-	func build() -> VBoxContainer:
+	func build(grid_parent = null) -> VBoxContainer:
 		var sec = VBoxContainer.new()
 		sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sec.add_constant_override("separation", 6)
 
 		# ---- Texture ----
-		sec.add_child(_label("Roof Style:"))
-
-		_add_grid(sec)
-
-		sec.add_child(_spacer(6))
+		if grid_parent != null:
+			_add_grid(grid_parent, true)
+		else:
+			sec.add_child(_label("Roof Style:"))
+			_add_grid(sec)
+			sec.add_child(_spacer(6))
 
 		# ---- Width ----
 		width_spin = _add_range(sec, "Width (px):", "width", 1.0, 8192.0, 1.0, 50.0)
@@ -845,13 +856,11 @@ class RoofPanel:
 		# ---- Sorting ----
 		sorting_option = _add_option(sec, "Sorting:", ["Over", "Under"], "sorting")
 
-		sec.add_child(_spacer(4))
-
 		# ---- Placement mode ----
 		placement_mode_option = _add_option(sec, "Placement Mode:", ["Ridge along area", "Expand (eave at area, roof outside)", "Inset (eave at area, roof inside)"], "placement_mode")
 		placement_mode_option.hint_tooltip = "Ridge: polygon edge is the ridge line, eave expands outward.\nExpand: polygon is the eave edge, ridge is outside the area.\nInset: polygon is the eave edge, ridge is inside the area."
 
-		sec.add_child(_spacer(4))
+		sec.add_child(HSeparator.new())
 
 		# ---- Shade ----
 		shade_check = CheckButton.new()
@@ -863,6 +872,7 @@ class RoofPanel:
 
 		_shade_sub = VBoxContainer.new()
 		_shade_sub.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_shade_sub.add_constant_override("separation", 6)
 		_shade_sub.visible = false
 
 		sun_dir_slider = _add_range(_shade_sub, "Sun Direction (deg):", "sun_direction", 0.0, 360.0, 1.0, 0.0, true)
@@ -956,6 +966,7 @@ class WaterPanel:
 	func build() -> VBoxContainer:
 		var sec = VBoxContainer.new()
 		sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sec.add_constant_override("separation", 6)
 		level_label = _label("Current map level | Water layer (0)")
 		sec.add_child(level_label)
 		deep_picker = _add_water_color(sec, "Deep water:", "deep_color", Color("3aa19a"))
@@ -967,6 +978,8 @@ class WaterPanel:
 		border_check.connect("toggled", self, "_on_border_toggled")
 		sec.add_child(border_check)
 		var note = _label("Click inside a Shape marker to fill.\nTouching water regions merge.\nTextures: native water and shore.\nCustom water textures are not saved\nby Dungeondraft.")
+		note.autowrap = true
+		note.add_color_override("font_color", Color(0.75, 0.78, 0.84, 0.85))
 		sec.add_child(note)
 		return sec
 
@@ -1097,6 +1110,23 @@ var _rf_roof_panel = null   # RoofPanel
 var _wf_section = null
 var _wf_water_panel = null   # WaterPanel
 
+# Left sidebar root & docked right-side resource panel
+var _root = null
+var _right_panel = null
+var _right_panel_attached_to_content = false
+var _pf_pattern_resource = null
+var _pf_tile_resource = null
+var _wb_wall_resource = null
+var _pb_path_resource = null
+var _rb_resource = null
+var _rb_floor_resource_header = null
+var _rb_pattern_resource_slot = null
+var _rb_tile_resource_slot = null
+var _rb_outline_resource_header = null
+var _rb_wall_resource_slot = null
+var _rb_path_resource_slot = null
+var _rf_roof_resource = null
+
 # ============================================================================
 # INIT
 # ============================================================================
@@ -1140,20 +1170,19 @@ func build(panel):
 
 	var root = VBoxContainer.new()
 	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.add_constant_override("separation", 10)
+	_root = root
 
-	# ---- Title ----
+	# ---- Title (matching GuidesLines sidebar header) ----
 	var title = Label.new()
 	title.text = "Building Planner"
 	title.align = Label.ALIGN_CENTER
+	title.add_color_override("font_color", Color(0.92, 0.95, 1.0, 1.0))
 	root.add_child(title)
+	root.add_child(HSeparator.new())
 
-	root.add_child(FeaturePanel._spacer(6))
-
-	# ---- Mode selector ----
-	var mode_label = Label.new()
-	mode_label.text = "Mode:"
-	root.add_child(mode_label)
-
+	# ---- Mode selector card ----
+	var mode_card = _create_section_card("Mode")
 	_mode_selector = OptionButton.new()
 	_mode_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_mode_selector.add_item("Floor Fill",  Mode.PATTERN_FILL)
@@ -1164,36 +1193,49 @@ func build(panel):
 	_mode_selector.add_item("Water Fill", Mode.WATER_FILL)
 	_mode_selector.selected = 0
 	_mode_selector.connect("item_selected", self, "_on_mode_selected")
-	root.add_child(_mode_selector)
+	mode_card.body.add_child(_mode_selector)
+	root.add_child(mode_card.card)
 
-	root.add_child(HSeparator.new())
+	# ---- Right-side resource panel (holds texture grids for all modes) ----
+	var resource_slots = _build_right_resource_panel()
 
-	# ---- Mode sections ----
-	_pf_section = VBoxContainer.new()
+	# ---- Mode sections (settings cards in left sidebar) ----
+	var pf_card = _create_section_card("Floor Fill")
+	_pf_section = pf_card.card
 	_pf_fill_selector = OptionButton.new()
+	_pf_fill_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_pf_fill_selector.add_item("Pattern")
 	_pf_fill_selector.add_item("Smart Tiles")
 	_pf_fill_selector.connect("item_selected", self, "_on_floor_fill_selected")
-	_pf_section.add_child(_pf_fill_selector)
-	_pf_pattern_container = _pf_pattern_panel.build()
-	_pf_tile_container = _pf_tile_panel.build()
-	_pf_section.add_child(_pf_pattern_container)
-	_pf_section.add_child(_pf_tile_container)
+	pf_card.body.add_child(_pf_fill_selector)
+	_pf_pattern_container = _pf_pattern_panel.build(resource_slots.pf_pattern)
+	_pf_tile_container = _pf_tile_panel.build(resource_slots.pf_tile)
+	pf_card.body.add_child(_pf_pattern_container)
+	pf_card.body.add_child(_pf_tile_container)
 	_pf_tile_container.hide()
 	root.add_child(_pf_section)
 
-	_wb_section = _wb_wall_panel.build()
+	var wb_card = _create_section_card("Wall Settings")
+	_wb_section = wb_card.card
+	wb_card.body.add_child(_wb_wall_panel.build(resource_slots.wb_wall))
 	root.add_child(_wb_section)
 
-	_pb_section = _pb_path_panel.build()
+	var pb_card = _create_section_card("Path Settings")
+	_pb_section = pb_card.card
+	pb_card.body.add_child(_pb_path_panel.build(resource_slots.pb_path))
 	root.add_child(_pb_section)
 
-	_rb_section = _build_room_builder_section()
+	_rb_section = _build_room_builder_section(resource_slots)
 	root.add_child(_rb_section)
 
-	_rf_section = _rf_roof_panel.build()
+	var rf_card = _create_section_card("Roof Settings")
+	_rf_section = rf_card.card
+	rf_card.body.add_child(_rf_roof_panel.build(resource_slots.rf_roof))
 	root.add_child(_rf_section)
-	_wf_section = _wf_water_panel.build()
+
+	var wf_card = _create_section_card("Water Fill")
+	_wf_section = wf_card.card
+	wf_card.body.add_child(_wf_water_panel.build())
 	root.add_child(_wf_section)
 
 	var mod_root = _tool.parent_mod.Global.get("Root")
@@ -1211,6 +1253,10 @@ func build(panel):
 			section.sample_button.text = ""
 		section.sample_button.connect("pressed", _tool, "start_sampling", [section])
 
+	# Attach right-side resource panel to Editor Content when available,
+	# or park it hidden inside root so headless tests free it with the panel.
+	_attach_right_panel()
+
 	# Show only the first mode's section
 	_show_section(Mode.PATTERN_FILL)
 
@@ -1223,6 +1269,7 @@ func build(panel):
 
 	# Sync tool state
 	_tool._set_mode(Mode.PATTERN_FILL)
+	update_resource_panel_state()
 
 ## Also called after late GuidesLines registration creates the feature instances.
 func bind_features() -> void:
@@ -1255,21 +1302,287 @@ func bind_features() -> void:
 	update_room_overrides()
 
 # ============================================================================
+# SHARED CARD & RIGHT-SIDE RESOURCE PANEL HELPERS (GuidesLines UI style)
+# ============================================================================
+
+func _create_card_stylebox() -> StyleBoxFlat:
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.08, 0.09, 0.11, 0.45)
+	style.border_color = Color(1.0, 1.0, 1.0, 0.10)
+	style.border_width_left = 1
+	style.border_width_right = 1
+	style.border_width_top = 1
+	style.border_width_bottom = 1
+	style.corner_radius_top_left = 6
+	style.corner_radius_top_right = 6
+	style.corner_radius_bottom_right = 6
+	style.corner_radius_bottom_left = 6
+	style.content_margin_left = 10.0
+	style.content_margin_right = 10.0
+	style.content_margin_top = 8.0
+	style.content_margin_bottom = 8.0
+	return style
+
+func _create_section_card(title_text: String, expand_vertical: bool = false) -> Dictionary:
+	var card = PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if expand_vertical:
+		card.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	card.add_stylebox_override("panel", _create_card_stylebox())
+
+	var body = VBoxContainer.new()
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if expand_vertical:
+		body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_constant_override("separation", 6)
+
+	var header = Label.new()
+	header.text = title_text
+	header.add_color_override("font_color", Color(0.75, 0.85, 0.96, 0.95))
+	body.add_child(header)
+	body.add_child(HSeparator.new())
+
+	card.add_child(body)
+	return {"card": card, "body": body, "header": header}
+
+func _get_editor_content():
+	if not _tool or not _tool.parent_mod or not _tool.parent_mod.Global:
+		return null
+	var editor = _tool.parent_mod.Global.get("Editor")
+	if not editor is Node or not is_instance_valid(editor):
+		return null
+	var content = editor.get_node_or_null("VPartition/Panels/HSplit/Content")
+	return content if content is Control and is_instance_valid(content) else null
+
+func _create_floating_panel_container(panel_name: String) -> PanelContainer:
+	var panel = PanelContainer.new()
+	panel.name = panel_name
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	var style = StyleBoxFlat.new()
+	style.content_margin_left = 10.0
+	style.content_margin_right = 10.0
+	style.content_margin_top = 8.0
+	style.content_margin_bottom = 8.0
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_detail = 4
+	var editor = _tool.parent_mod.Global.get("Editor") if _tool and _tool.parent_mod and _tool.parent_mod.Global else null
+	var tools_node = editor.get_node_or_null("VPartition/Panels/Tools") if editor is Node and is_instance_valid(editor) else null
+	if tools_node and tools_node.material:
+		panel.material = tools_node.material
+		style.bg_color = Color(1, 1, 1, 1)
+	else:
+		style.bg_color = Color(0.14, 0.14, 0.16, 0.92)
+	panel.add_stylebox_override("panel", style)
+	return panel
+
+func _create_resource_slot() -> VBoxContainer:
+	var slot = VBoxContainer.new()
+	slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slot.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	slot.add_constant_override("separation", 6)
+	return slot
+
+func _build_right_resource_panel() -> Dictionary:
+	_right_panel = _create_floating_panel_container("BuildingPlannerResourcePanel")
+	_right_panel.anchor_left = 1.0
+	_right_panel.anchor_right = 1.0
+	_right_panel.anchor_top = 0.0
+	_right_panel.anchor_bottom = 1.0
+	_right_panel.margin_left = -310.0
+	_right_panel.margin_right = -10.0
+	_right_panel.margin_top = 10.0
+	_right_panel.margin_bottom = -10.0
+	_right_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_right_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_right_panel.rect_min_size = Vector2(280, 0)
+	_right_panel.visible = false
+
+	var wrapper = VBoxContainer.new()
+	wrapper.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	wrapper.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	wrapper.add_constant_override("separation", 8)
+	_right_panel.add_child(wrapper)
+
+	var title = Label.new()
+	title.text = "Resources"
+	title.align = Label.ALIGN_CENTER
+	title.add_color_override("font_color", Color(0.92, 0.95, 1.0, 1.0))
+	wrapper.add_child(title)
+	wrapper.add_child(HSeparator.new())
+
+	var pf_pattern_card = _create_section_card("Floor Pattern", true)
+	_pf_pattern_resource = pf_pattern_card.card
+	wrapper.add_child(_pf_pattern_resource)
+
+	var pf_tile_card = _create_section_card("Smart Tiles", true)
+	_pf_tile_resource = pf_tile_card.card
+	_pf_tile_resource.visible = false
+	wrapper.add_child(_pf_tile_resource)
+
+	var wb_wall_card = _create_section_card("Wall Texture", true)
+	_wb_wall_resource = wb_wall_card.card
+	_wb_wall_resource.visible = false
+	wrapper.add_child(_wb_wall_resource)
+
+	var pb_path_card = _create_section_card("Path Texture", true)
+	_pb_path_resource = pb_path_card.card
+	_pb_path_resource.visible = false
+	wrapper.add_child(_pb_path_resource)
+
+	_rb_resource = VBoxContainer.new()
+	_rb_resource.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_rb_resource.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_rb_resource.add_constant_override("separation", 8)
+	_rb_resource.visible = false
+	wrapper.add_child(_rb_resource)
+
+	var rb_floor_card = _create_section_card("Floor Pattern", true)
+	_rb_floor_resource_header = rb_floor_card.header
+	_rb_pattern_resource_slot = _create_resource_slot()
+	_rb_tile_resource_slot = _create_resource_slot()
+	_rb_tile_resource_slot.visible = false
+	rb_floor_card.body.add_child(_rb_pattern_resource_slot)
+	rb_floor_card.body.add_child(_rb_tile_resource_slot)
+	_rb_resource.add_child(rb_floor_card.card)
+
+	var rb_outline_card = _create_section_card("Outline: Wall Default", true)
+	_rb_outline_resource_header = rb_outline_card.header
+	_rb_wall_resource_slot = _create_resource_slot()
+	_rb_path_resource_slot = _create_resource_slot()
+	_rb_path_resource_slot.visible = false
+	rb_outline_card.body.add_child(_rb_wall_resource_slot)
+	rb_outline_card.body.add_child(_rb_path_resource_slot)
+	_rb_resource.add_child(rb_outline_card.card)
+
+	var rf_roof_card = _create_section_card("Roof Style", true)
+	_rf_roof_resource = rf_roof_card.card
+	_rf_roof_resource.visible = false
+	wrapper.add_child(_rf_roof_resource)
+
+	return {
+		"pf_pattern": pf_pattern_card.body,
+		"pf_tile": pf_tile_card.body,
+		"wb_wall": wb_wall_card.body,
+		"pb_path": pb_path_card.body,
+		"rb_pattern": _rb_pattern_resource_slot,
+		"rb_tile": _rb_tile_resource_slot,
+		"rb_wall": _rb_wall_resource_slot,
+		"rb_path": _rb_path_resource_slot,
+		"rf_roof": rf_roof_card.body,
+	}
+
+func _attach_right_panel() -> void:
+	if not is_instance_valid(_right_panel):
+		return
+	var content = _get_editor_content()
+	if content != null:
+		if _right_panel.get_parent() != content:
+			if _right_panel.get_parent() != null:
+				_right_panel.get_parent().remove_child(_right_panel)
+			content.add_child(_right_panel)
+		_right_panel_attached_to_content = true
+		return
+	_right_panel_attached_to_content = false
+	if is_instance_valid(_root) and _right_panel.get_parent() != _root:
+		if _right_panel.get_parent() != null:
+			_right_panel.get_parent().remove_child(_right_panel)
+		_right_panel.visible = false
+		_root.add_child(_right_panel)
+
+func _destroy_right_panel() -> void:
+	if is_instance_valid(_right_panel):
+		var in_tree = _right_panel.is_inside_tree()
+		if _right_panel.get_parent() != null:
+			_right_panel.get_parent().remove_child(_right_panel)
+		if in_tree:
+			_right_panel.queue_free()
+		else:
+			_right_panel.free()
+	_right_panel = null
+	_right_panel_attached_to_content = false
+	_pf_pattern_resource = null
+	_pf_tile_resource = null
+	_wb_wall_resource = null
+	_pb_path_resource = null
+	_rb_resource = null
+	_rb_floor_resource_header = null
+	_rb_pattern_resource_slot = null
+	_rb_tile_resource_slot = null
+	_rb_outline_resource_header = null
+	_rb_wall_resource_slot = null
+	_rb_path_resource_slot = null
+	_rf_roof_resource = null
+
+func update_resource_panel_state() -> void:
+	if not is_instance_valid(_right_panel):
+		return
+	var content = _get_editor_content()
+	if not _right_panel_attached_to_content or (content != null and _right_panel.get_parent() != content):
+		_attach_right_panel()
+	var mode = get_selected_mode()
+	var smart_tiles = _pf_fill_selector != null and _pf_fill_selector.selected == 1
+	var rb_tiles = _rb_fill_selector != null and _rb_fill_selector.selected == 1
+	var rb_outline_mode = _active_rb_outline_mode()
+	if is_instance_valid(_pf_pattern_resource):
+		_pf_pattern_resource.visible = (mode == Mode.PATTERN_FILL and not smart_tiles)
+	if is_instance_valid(_pf_tile_resource):
+		_pf_tile_resource.visible = (mode == Mode.PATTERN_FILL and smart_tiles)
+	if is_instance_valid(_wb_wall_resource):
+		_wb_wall_resource.visible = (mode == Mode.WALL_BUILDER)
+	if is_instance_valid(_pb_path_resource):
+		_pb_path_resource.visible = (mode == Mode.PATH_BUILDER)
+	if is_instance_valid(_rb_resource):
+		_rb_resource.visible = (mode == Mode.ROOM_BUILDER)
+	if is_instance_valid(_rb_pattern_resource_slot):
+		_rb_pattern_resource_slot.visible = not rb_tiles
+	if is_instance_valid(_rb_tile_resource_slot):
+		_rb_tile_resource_slot.visible = rb_tiles
+	if is_instance_valid(_rb_floor_resource_header):
+		_rb_floor_resource_header.text = "Floor Smart Tiles" if rb_tiles else "Floor Pattern"
+	if is_instance_valid(_rb_wall_resource_slot):
+		_rb_wall_resource_slot.visible = (rb_outline_mode == 0)
+	if is_instance_valid(_rb_path_resource_slot):
+		_rb_path_resource_slot.visible = (rb_outline_mode == 1)
+	if is_instance_valid(_rb_outline_resource_header):
+		var list = _rb_outline_list()
+		var idx = _rb_outline_index()
+		var outline_name = list[idx].name if idx >= 0 and idx < list.size() else ("Wall" if rb_outline_mode == 0 else "Path")
+		_rb_outline_resource_header.text = "Outline: %s" % outline_name
+	if is_instance_valid(_rf_roof_resource):
+		_rf_roof_resource.visible = (mode == Mode.ROOF_BUILDER)
+	var enabled = _tool != null and _tool.is_enabled
+	_right_panel.visible = enabled and _right_panel_attached_to_content and mode != Mode.WATER_FILL
+
+func is_mouse_over_right_panel() -> bool:
+	if not is_instance_valid(_right_panel) or not _right_panel.is_visible_in_tree():
+		return false
+	return Rect2(Vector2.ZERO, _right_panel.rect_size).has_point(_right_panel.get_local_mouse_position())
+
+# ============================================================================
 # SECTION BUILDERS
 # ============================================================================
 
-func _build_room_builder_section() -> VBoxContainer:
+func _build_room_builder_section(resource_slots: Dictionary = {}) -> VBoxContainer:
 	var sec = VBoxContainer.new()
 	sec.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sec.add_constant_override("separation", 10)
+
+	var setup_card = _create_section_card("Room Setup")
+	var setup_body = setup_card.body
 	var source_hint = Label.new()
 	source_hint.text = "Uses the selected GuidesLines template/group, or its Shape settings."
 	source_hint.autowrap = true
-	sec.add_child(source_hint)
+	source_hint.add_color_override("font_color", Color(0.75, 0.78, 0.84, 0.85))
+	setup_body.add_child(source_hint)
 
 	# ---- Sub-mode selector ----
 	var sub_mode_label = Label.new()
 	sub_mode_label.text = "Sub-mode:"
-	sec.add_child(sub_mode_label)
+	setup_body.add_child(sub_mode_label)
 
 	_rb_sub_mode_selector = OptionButton.new()
 	_rb_sub_mode_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1280,17 +1593,16 @@ func _build_room_builder_section() -> VBoxContainer:
 	_rb_sub_mode_selector.add_item("Difference", 4)
 	_rb_sub_mode_selector.selected = 0
 	_rb_sub_mode_selector.connect("item_selected", self, "_on_rb_sub_mode")
-	sec.add_child(_rb_sub_mode_selector)
-	_build_room_templates(sec)
+	setup_body.add_child(_rb_sub_mode_selector)
+	_build_room_templates(setup_body)
 	_rb_override_label = FeaturePanel._label("")
-	sec.add_child(_rb_override_label)
+	setup_body.add_child(_rb_override_label)
 	var reset = Button.new()
 	reset.text = "Reset rotation / scale"
 	reset.connect("pressed", self, "_reset_room_overrides")
-	sec.add_child(reset)
+	setup_body.add_child(reset)
 	update_room_overrides()
-
-	sec.add_child(FeaturePanel._spacer(6))
+	sec.add_child(setup_card.card)
 
 	# ---- Collapsible Floor panel ----
 	var floor_card = _build_collapsible_card("Floor", true)
@@ -1304,13 +1616,11 @@ func _build_room_builder_section() -> VBoxContainer:
 	_rb_fill_selector.add_item("Smart Tiles")
 	_rb_fill_selector.connect("item_selected", self, "_on_rb_fill_selected")
 	_rb_floor_body.add_child(_rb_fill_selector)
-	_rb_pattern_container = _rb_pattern_panel.build()
-	_rb_tile_container = _rb_tile_panel.build()
+	_rb_pattern_container = _rb_pattern_panel.build(resource_slots.get("rb_pattern"))
+	_rb_tile_container = _rb_tile_panel.build(resource_slots.get("rb_tile"))
 	_rb_tile_container.hide()
 	_rb_floor_body.add_child(_rb_pattern_container)
 	_rb_floor_body.add_child(_rb_tile_container)
-
-	sec.add_child(FeaturePanel._spacer(6))
 
 	# ---- Collapsible Walls & Outlines panel ----
 	var outlines_card = _build_collapsible_card("Walls & Outlines", true)
@@ -1365,14 +1675,14 @@ func _build_room_builder_section() -> VBoxContainer:
 	_rb_outline_name_dialog.connect("confirmed", self, "_on_rb_outline_name_confirmed")
 	sec.add_child(_rb_outline_name_dialog)
 
-	_rb_outlines_body.add_child(FeaturePanel._spacer(4))
+	_rb_outlines_body.add_child(HSeparator.new())
 
 	# ---- Wall sub-panel (visible when active outline = Wall) ----
-	_rb_wall_container = _rb_wall_panel.build()
+	_rb_wall_container = _rb_wall_panel.build(resource_slots.get("rb_wall"))
 	_rb_outlines_body.add_child(_rb_wall_container)
 
 	# ---- Path sub-panel (visible when active outline = Path) ----
-	_rb_path_container = _rb_path_panel.build()
+	_rb_path_container = _rb_path_panel.build(resource_slots.get("rb_path"))
 	_rb_path_container.visible = false
 	_rb_outlines_body.add_child(_rb_path_container)
 
@@ -1383,26 +1693,11 @@ func _build_room_builder_section() -> VBoxContainer:
 func _build_collapsible_card(title: String, expanded: bool = true) -> Dictionary:
 	var card = PanelContainer.new()
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.14, 0.15, 0.17, 0.72)
-	style.border_color = Color(0.35, 0.38, 0.44, 0.85)
-	style.border_width_left = 1
-	style.border_width_right = 1
-	style.border_width_top = 1
-	style.border_width_bottom = 1
-	style.corner_radius_top_left = 4
-	style.corner_radius_top_right = 4
-	style.corner_radius_bottom_left = 4
-	style.corner_radius_bottom_right = 4
-	style.content_margin_left = 8
-	style.content_margin_right = 8
-	style.content_margin_top = 6
-	style.content_margin_bottom = 6
-	card.add_stylebox_override("panel", style)
+	card.add_stylebox_override("panel", _create_card_stylebox())
 
 	var vbox = VBoxContainer.new()
 	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_constant_override("separation", 4)
+	vbox.add_constant_override("separation", 6)
 	card.add_child(vbox)
 
 	var toggle = Button.new()
@@ -1412,13 +1707,18 @@ func _build_collapsible_card(title: String, expanded: bool = true) -> Dictionary
 	toggle.align = Button.ALIGN_LEFT
 	toggle.focus_mode = Control.FOCUS_NONE
 	toggle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	toggle.add_color_override("font_color", Color(0.75, 0.85, 0.96, 0.95))
+	toggle.add_color_override("font_color_hover", Color(0.92, 0.95, 1.0, 1.0))
+	toggle.add_color_override("font_color_pressed", Color(0.75, 0.85, 0.96, 0.95))
 	toggle.set_meta("section_title", title)
 	toggle.text = ("[-] " if expanded else "[+] ") + title
 	vbox.add_child(toggle)
 
 	var body = VBoxContainer.new()
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.add_constant_override("separation", 6)
 	body.visible = expanded
+	body.add_child(HSeparator.new())
 	vbox.add_child(body)
 
 	toggle.connect("toggled", self, "_on_collapsible_section_toggled", [toggle, body])
@@ -1695,7 +1995,9 @@ func sync_roof_settings(gl) -> void:
 
 func shutdown() -> void:
 	release_all_grid_menus()
+	_destroy_right_panel()
 	if _wf_water_panel: _wf_water_panel.bind_feature(null)
+	_root = null
 	_tool = null
 
 ## Populate only the active section; owned grids retain their data until map change.
@@ -1771,6 +2073,7 @@ func _show_section(mode: int):
 	if _rb_section: _rb_section.visible = (mode == Mode.ROOM_BUILDER)
 	if _rf_section: _rf_section.visible = (mode == Mode.ROOF_BUILDER)
 	if _wf_section: _wf_section.visible = (mode == Mode.WATER_FILL)
+	update_resource_panel_state()
 	if _tool and _tool.is_enabled:
 		try_build_grid_menus(mode)
 	elif _tool and _tool.parent_mod:
@@ -1786,6 +2089,7 @@ func _on_floor_fill_selected(index):
 	_tool.smart_tiles_enabled = index == 1
 	_pf_pattern_container.visible = index == 0
 	_pf_tile_container.visible = index == 1
+	update_resource_panel_state()
 	if _tool.is_enabled: try_build_grid_menus(Mode.PATTERN_FILL)
 
 func _on_mode_selected(index):
@@ -1828,6 +2132,7 @@ func _on_rb_fill_selected(index: int):
 	if _tool._room_builder: _tool._room_builder.active_fill_mode = index
 	_rb_pattern_container.visible = index == 0
 	_rb_tile_container.visible = index == 1
+	update_resource_panel_state()
 	if _tool.is_enabled: try_build_grid_menus(Mode.ROOM_BUILDER)
 
 func _active_rb_outline_mode() -> int:
@@ -1885,6 +2190,7 @@ func rebuild_room_outlines() -> void:
 		_rb_outlines_toggle.text = ("[-] " if _rb_outlines_toggle.pressed else "[+] ") + title
 	if _rb_outline_name_dialog:
 		_rb_outline_name_dialog.hide()
+	update_resource_panel_state()
 
 func _sync_panel_from_outline(panel, active_settings: Dictionary) -> void:
 	if not panel or not panel.has_method("apply_sample") or active_settings.empty():

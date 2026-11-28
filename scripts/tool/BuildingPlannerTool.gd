@@ -160,6 +160,7 @@ func Enable():
 	# Restore the active mode from the UI selector.
 	_set_mode(_ui.get_selected_mode() if _ui else Mode.PATTERN_FILL)
 	if _ui:
+		_ui.update_resource_panel_state()
 		_ui.try_build_grid_menus(_active_mode)
 
 # Called when the user switches away from this tool.
@@ -168,6 +169,7 @@ func Disable():
 	is_enabled = false
 	if _ui:
 		_ui.release_search_focus()
+		_ui.update_resource_panel_state()
 	# Do NOT reset _active_mode here — the overlay already guards on is_enabled,
 	# and we need the mode to survive Disable/Enable cycles (e.g. SelectTool round-trip).
 	# Keep our own grids and selections across tool switches.
@@ -387,6 +389,8 @@ func is_mouse_on_canvas() -> bool:
 	if viewport.gui_has_modal_stack():
 		return false
 	if is_instance_valid(tool_panel) and tool_panel.is_visible_in_tree() and Rect2(Vector2.ZERO, tool_panel.rect_size).has_point(tool_panel.get_local_mouse_position()):
+		return false
+	if _ui and _ui.has_method("is_mouse_over_right_panel") and _ui.is_mouse_over_right_panel():
 		return false
 	var editor = parent_mod.Global.Editor
 	if editor is Node and is_instance_valid(editor):
